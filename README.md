@@ -1,10 +1,13 @@
-# Auto-Agent 智能体框架设计方案
-
-## 1. 项目概述
+# Auto-Agent 智能体框架
+<p align="center">
+  <img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python Version" />
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
+</p>
 
 Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主规划、工具调用、记忆管理等核心能力。
 
-### 1.1 核心特性
+## 🌟 核心特性
 
 - 🤖 **自主规划**：基于 LLM 的任务分解和执行计划生成
 - 🔧 **工具系统**：灵活的工具注册和调用机制
@@ -13,31 +16,115 @@ Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主
 - 📝 **结构化日志**：完整的执行过程追踪
 - 🎯 **意图识别**：自动识别用户意图并路由到合适的处理流程
 
-## 2. 架构设计
+## 🚀 快速开始
 
-### 2.1 整体架构
+### 环境要求
 
-┌─────────────────────────────────────────────────────────────┐ │ User Input │ └──────────────────────────┬──────────────────────────────────┘ │ ▼ ┌─────────────────────────────────────────────────────────────┐ │ Agent Orchestrator │ │ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ │ │ │ Intent │ │ Task │ │ Memory │ │ │ │ Recognizer │─▶│ Planner │─▶│ Manager │ │ │ └─────────────┘ └──────────────┘ └──────────────┘ │ └──────────────────────────┬──────────────────────────────────┘ │ ▼ ┌─────────────────────────────────────────────────────────────┐ │ Execution Engine │ │ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐ │ │ │ Tool │ │ Retry │ │ Result │ │ │ │ Registry │─▶│ Controller │─▶│ Aggregator │ │ │ └─────────────┘ └──────────────┘ └──────────────┘ │ └──────────────────────────┬──────────────────────────────────┘ │ ▼ ┌─────────────────────────────────────────────────────────────┐ │ Memory System │ │ ┌─────────────────────┐ ┌─────────────────────┐ │ │ │ Long-term Memory │ │ Short-term Memory │ │ │ │ (User Profile) │ │ (Conversation) │ │ │ │ - Preferences │ │ - Context │ │ │ │ - History │ │ - Working Memory │ │ │ │ - Knowledge │ │ - Temp State │ │ │ └─────────────────────┘ └─────────────────────┘ │ └─────────────────────────────────────────────────────────────┘
+- Python 3.10+
+- 支持的 LLM 提供商：OpenAI、DeepSeek、Anthropic
 
-### 2.2 核心组件
+### 安装
 
-#### 2.2.1 Agent Orchestrator（智能体编排器）
+```bash
+pip install auto-agent
+```
+
+或者从源码安装：
+
+```bash
+git clone https://github.com/your-org/auto-agent.git
+cd auto-agent
+pip install -e .
+```
+
+### 基本使用
+
+```python
+from auto_agent import AutoAgent, LLMClient, ToolRegistry
+from auto_agent.memory import LongTermMemory, ShortTermMemory
+from auto_agent.tools.builtin import CalculatorTool, WebSearchTool
+
+# 初始化
+llm = LLMClient(provider="deepseek", api_key="sk-xxx")
+tool_registry = ToolRegistry()
+tool_registry.register(CalculatorTool())
+tool_registry.register(WebSearchTool())
+
+ltm = LongTermMemory(storage_path="./user_memories")
+stm = ShortTermMemory(backend="sqlite", db_path="./conversations.db")
+
+agent = AutoAgent(
+    llm_client=llm,
+    tool_registry=tool_registry,
+    long_term_memory=ltm,
+    short_term_memory=stm
+)
+
+# 执行任务
+response = await agent.run(
+    query="帮我计算 123 * 456，然后搜索相关的数学知识",
+    user_id="user_001"
+)
+
+print(response.content)
+```
+
+## 🏗️ 架构设计
+
+### 整体架构
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    User Input                               │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Agent Orchestrator                        │
+│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
+│ │ Intent      │ │ Task         │ │ Memory       │          │
+│ │ Recognizer  │─▶│ Planner      │─▶│ Manager      │          │
+│ └─────────────┘ └──────────────┘ └──────────────┘          │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Execution Engine                         │
+│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
+│ │ Tool        │ │ Retry        │ │ Result       │          │
+│ │ Registry    │─▶│ Controller   │─▶│ Aggregator   │          │
+│ └─────────────┘ └──────────────┘ └──────────────┘          │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Memory System                         │
+│ ┌─────────────────────┐ ┌─────────────────────┐           │
+│ │ Long-term Memory    │ │ Short-term Memory   │           │
+│ │ (User Profile)      │ │ (Conversation)      │           │
+│ │ - Preferences       │ │ - Context           │           │
+│ │ - History           │ │ - Working Memory    │           │
+│ │ - Knowledge         │ │ - Temp State        │           │
+│ └─────────────────────┘ └─────────────────────┘           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 核心组件
+
+#### Agent Orchestrator（智能体编排器）
 - **IntentRecognizer**：意图识别和分类
 - **TaskPlanner**：任务分解和执行计划生成
 - **MemoryManager**：记忆的读取和更新
 
-#### 2.2.2 Execution Engine（执行引擎）
+#### Execution Engine（执行引擎）
 - **ToolRegistry**：工具注册表和管理
 - **RetryController**：重试策略和错误处理
 - **ResultAggregator**：结果聚合和格式化
 
-#### 2.2.3 Memory System（记忆系统）
+#### Memory System（记忆系统）
 - **LongTermMemory**：持久化用户记忆
 - **ShortTermMemory**：临时对话记忆
 
-## 3. 详细设计
+## 🧠 详细设计
 
-### 3.1 记忆系统设计
+### 记忆系统设计
 
 #### 3.1.1 长期记忆（Long-term Memory）
 
@@ -85,8 +172,12 @@ class LongTermMemory:
     def search_memory(self, user_id: str, query: str) -> List[MemoryItem]
     def add_fact(self, user_id: str, fact: str, category: str)
     def get_relevant_context(self, user_id: str, task: str) -> str
-3.1.2 短期记忆（Short-term Memory）
+```
+
+#### 短期记忆（Short-term Memory）
+
 存储方式：内存 + 可选持久化（SQLite/Redis） 数据结构：
+```python
 @dataclass
 class ConversationMemory:
     conversation_id: str
@@ -110,7 +201,10 @@ class WorkingMemory:
     task_history: List[Task]
     tool_results: Dict[str, Any]
     intermediate_steps: List[Step]
+```
+
 API 设计：
+```python
 class ShortTermMemory:
     def create_conversation(self, user_id: str) -> str
     def add_message(self, conversation_id: str, message: Message)
@@ -120,10 +214,16 @@ class ShortTermMemory:
     def get_working_memory(self, conversation_id: str) -> WorkingMemory
     def clear_working_memory(self, conversation_id: str)
     def summarize_conversation(self, conversation_id: str) -> str
-3.2 自主规划系统
-3.2.1 任务规划流程
+```
+### 自主规划系统
+
+#### 任务规划流程
+
 User Query → Intent Recognition → Task Decomposition → Tool Selection → Execution Plan
+
 规划提示词模板：
+
+```python
 PLANNING_PROMPT = """
 You are an intelligent task planner. Given a user query, you need to:
 1. Understand the user's intent
@@ -157,7 +257,11 @@ Please generate a detailed execution plan in JSON format:
   "expected_outcome": "..."
 }}
 """
-3.2.2 TaskPlanner 实现
+```
+
+#### TaskPlanner 实现
+
+```python
 class TaskPlanner:
     def __init__(self, llm_client: LLMClient, tool_registry: ToolRegistry):
         self.llm_client = llm_client
@@ -178,8 +282,12 @@ class TaskPlanner:
         execution_history: List[StepResult]
     ) -> ExecutionPlan:
         """根据错误重新规划"""
-3.3 工具系统设计
-3.3.1 工具定义标准
+```
+### 工具系统设计
+
+#### 工具定义标准
+
+```python
 from typing import Any, Dict, List, Optional, Callable
 from pydantic import BaseModel, Field
 
@@ -218,7 +326,10 @@ class BaseTool:
     def get_schema(self) -> Dict[str, Any]:
         """返回 JSON Schema"""
         return self.definition.dict()
-3.3.2 工具注册表
+```
+#### 工具注册表
+
+```python
 class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
@@ -241,8 +352,12 @@ class ToolRegistry:
         
     def get_tool_descriptions(self) -> str:
         """获取所有工具的描述（用于提示词）"""
-3.4 重试机制设计
-3.4.1 重试策略
+```
+### 重试机制设计
+
+#### 重试策略
+
+```python
 from enum import Enum
 from typing import Optional, Callable
 
@@ -291,7 +406,10 @@ class RetryController:
         
     def get_delay(self, attempt: int) -> float:
         """计算延迟时间"""
-3.4.2 智能重试（基于 LLM）
+```
+#### 智能重试（基于 LLM）
+
+```python
 ERROR_ANALYSIS_PROMPT = """
 An error occurred during task execution. Please analyze the error and provide suggestions.
 
@@ -326,7 +444,10 @@ Respond in JSON format:
   "reasoning": "..."
 }}
 """
-3.5 Agent 执行流程
+```
+### Agent 执行流程
+
+```python
 class AutoAgent:
     def __init__(
         self,
@@ -420,7 +541,10 @@ class AutoAgent:
             plan=plan,
             execution_results=results
         )
-4. 目录结构
+```
+## 📁 目录结构
+
+```
 auto-agent/
 ├── auto_agent/
 │   ├── __init__.py
@@ -493,24 +617,29 @@ auto-agent/
 ├── README.md
 ├── LICENSE
 └── .gitignore
-5. 技术栈
-Python: 3.10+
-核心依赖:
-pydantic: 数据验证
-asyncio: 异步编程
-httpx: HTTP 客户端
-tenacity: 重试库（可选，也可自己实现）
-存储:
-aiosqlite: SQLite 异步支持
-redis: Redis 客户端
-文件系统（Markdown）
-LLM:
-openai: OpenAI SDK
-支持兼容 OpenAI API 的其他提供商
-日志:
-loguru: 强大的日志库
-6. 使用示例
-6.1 基础使用
+```
+## 🛠️ 技术栈
+
+- **Python**: 3.10+
+- **核心依赖**:
+  - `pydantic`: 数据验证
+  - `asyncio`: 异步编程
+  - `httpx`: HTTP 客户端
+  - `tenacity`: 重试库（可选，也可自己实现）
+- **存储**:
+  - `aiosqlite`: SQLite 异步支持
+  - `redis`: Redis 客户端
+  - 文件系统（Markdown）
+- **LLM**:
+  - `openai`: OpenAI SDK
+  - 支持兼容 OpenAI API 的其他提供商
+- **日志**:
+  - `loguru`: 强大的日志库
+## 📖 使用示例
+
+### 基础使用
+
+```python
 from auto_agent import AutoAgent, LLMClient, ToolRegistry
 from auto_agent.memory import LongTermMemory, ShortTermMemory
 from auto_agent.tools.builtin import CalculatorTool, WebSearchTool
@@ -538,7 +667,10 @@ response = await agent.run(
 )
 
 print(response.content)
-6.2 自定义工具
+```
+### 自定义工具
+
+```python
 from auto_agent.tools import BaseTool, ToolDefinition, ToolParameter
 
 class CustomTool(BaseTool):
@@ -565,7 +697,10 @@ class CustomTool(BaseTool):
 
 # 注册
 tool_registry.register(CustomTool())
-6.3 长期记忆管理
+```
+### 长期记忆管理
+
+```python
 # 更新用户偏好
 ltm.update_user_memory("user_001", {
     "preferences": {
@@ -586,3 +721,48 @@ context = ltm.get_relevant_context(
     user_id="user_001",
     task="帮我写一个 FastAPI 接口"
 )
+```
+
+## 🤝 贡献指南
+
+我们欢迎社区贡献！如果您想为 Auto-Agent 做出贡献，请遵循以下步骤：
+
+1. Fork 项目仓库
+2. 创建您的功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+### 开发环境设置
+
+```bash
+git clone https://github.com/your-org/auto-agent.git
+cd auto-agent
+pip install -e ".[dev]"
+```
+
+### 运行测试
+
+```bash
+# 运行所有测试
+pytest
+
+# 运行特定测试
+pytest tests/test_agent.py
+```
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 📞 联系我们
+
+- 项目维护者: Auto-Agent Team
+- GitHub Issues: [https://github.com/your-org/auto-agent/issues](https://github.com/your-org/auto-agent/issues)
+- 邮箱: team@example.com
+
+---
+
+<div align="center">
+  <strong>🚀 使用 Auto-Agent 构建下一代智能应用!</strong>
+</div>
