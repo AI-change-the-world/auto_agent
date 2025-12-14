@@ -13,7 +13,10 @@ Auto-Agent 智能体框架
 """
 
 from auto_agent.core.agent import AutoAgent
+from auto_agent.core.context import ExecutionContext, StepRecord
 from auto_agent.core.editor.parser import AgentDefinition, AgentMarkdownParser
+from auto_agent.core.executor import ExecutionEngine
+from auto_agent.core.planner import TaskPlanner
 from auto_agent.core.report.generator import ExecutionReportGenerator
 from auto_agent.core.router.intent import IntentHandler, IntentResult, IntentRouter
 from auto_agent.llm.client import LLMClient
@@ -58,6 +61,10 @@ __version__ = "0.1.0"
 __all__ = [
     # 核心
     "AutoAgent",
+    "ExecutionContext",
+    "StepRecord",
+    "ExecutionEngine",
+    "TaskPlanner",
     "LLMClient",
     "OpenAIClient",
     # 报告和编辑

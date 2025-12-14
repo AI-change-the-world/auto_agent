@@ -171,6 +171,22 @@ class ToolDefinition:
     # 压缩函数：(result, state) -> compressed_result
     compress_function: Optional[Callable] = None
 
+    # 参数别名映射：{param_name: state_field_name}
+    # 例如 {"input_text": "query"} 表示从 state["query"] 读取值赋给 input_text 参数
+    param_aliases: Dict[str, str] = field(default_factory=dict)
+
+    # 状态写入映射：{result_field: state_field}
+    # 例如 {"search_query": "search_queries"} 表示将 result["search_query"] 写入 state["search_queries"]
+    state_mapping: Dict[str, str] = field(default_factory=dict)
+
+    # Prompt 模板：用于 LLM 动态生成工具调用 prompt
+    # 支持 {变量名} 占位符，变量从 ExecutionContext.state 中获取
+    # 例如 "根据以下大纲 {outline} 和用户需求 {inputs.query}，生成一份专业的 {document_type}"
+    prompt_template: Optional[str] = None
+
+    # 是否启用动态 prompt 生成（让 LLM 根据上下文自动生成 prompt）
+    dynamic_prompt: bool = False
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {

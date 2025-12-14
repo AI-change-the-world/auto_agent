@@ -335,6 +335,8 @@ def func_tool(
     compress_function: Optional[Callable] = None,
     validate_function: Optional[Callable] = None,
     context_param: Optional[str] = None,
+    param_aliases: Optional[Dict[str, str]] = None,
+    state_mapping: Optional[Dict[str, str]] = None,
     auto_register: bool = True,
 ):
     """
@@ -379,6 +381,16 @@ def func_tool(
     async def db_query(ctx, query: str) -> dict:
         # ctx 会在 execute 时通过 kwargs 传入
         return {"success": True}
+
+    # 方式4: 参数别名和状态映射
+    @func_tool(
+        name="analyze_input",
+        description="分析输入",
+        param_aliases={"input_text": "query"},  # 从 state["query"] 读取值赋给 input_text
+        state_mapping={"search_query": "search_queries"},  # 将 result["search_query"] 写入 state["search_queries"]
+    )
+    async def analyze_input(ctx, input_text: str) -> dict:
+        return {"success": True}
     ```
 
     Args:
@@ -391,6 +403,8 @@ def func_tool(
         compress_function: 自定义结果压缩函数
         validate_function: 自定义验证函数
         context_param: 上下文参数名（如 "ctx"），该参数不会被推断为工具参数
+        param_aliases: 参数别名映射 {param_name: state_field_name}
+        state_mapping: 状态写入映射 {result_field: state_field}
         auto_register: 是否自动注册到全局注册表
     """
 
@@ -471,6 +485,10 @@ def func_tool(
         _captured_params = param_list
         _context_param = context_param
 
+        # 保存别名和映射
+        _param_aliases = param_aliases or {}
+        _state_mapping = state_mapping or {}
+
         # 创建动态工具类
         class FuncTool(BaseTool):
             @property
@@ -484,6 +502,8 @@ def func_tool(
                     output_schema=output_schema,
                     compress_function=compress_function,
                     validate_function=validate_function,
+                    param_aliases=_param_aliases,
+                    state_mapping=_state_mapping,
                 )
 
             async def execute(self, **kwargs) -> Any:
