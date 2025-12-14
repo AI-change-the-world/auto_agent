@@ -333,6 +333,8 @@ def func_tool(
     parameters: Optional[List[Dict[str, Any]]] = None,
     output_schema: Optional[Dict[str, Any]] = None,
     compress_function: Optional[Callable] = None,
+    validate_function: Optional[Callable] = None,
+    context_param: Optional[str] = None,
     auto_register: bool = True,
 ):
     """
@@ -367,6 +369,16 @@ def func_tool(
     )
     async def search_docs(query: str, limit: int = 10) -> dict:
         return {"success": True, "documents": [...]}
+
+    # 方式3: 带上下文参数（如数据库连接）
+    @func_tool(
+        name="db_query",
+        description="数据库查询",
+        context_param="ctx",  # 指定上下文参数名
+    )
+    async def db_query(ctx, query: str) -> dict:
+        # ctx 会在 execute 时通过 kwargs 传入
+        return {"success": True}
     ```
 
     Args:
@@ -377,11 +389,18 @@ def func_tool(
         parameters: 参数定义列表（可选，不提供则自动推断）
         output_schema: 输出结构定义
         compress_function: 自定义结果压缩函数
+        validate_function: 自定义验证函数
+        context_param: 上下文参数名（如 "ctx"），该参数不会被推断为工具参数
         auto_register: 是否自动注册到全局注册表
     """
 
     def decorator(func: Callable):
         param_list = []
+
+        # 需要跳过的参数名
+        skip_params = {"self", "cls", "kwargs"}
+        if context_param:
+            skip_params.add(context_param)
 
         # 如果手动指定了 parameters，使用手动指定的
         if parameters:
@@ -411,7 +430,7 @@ def func_tool(
             }
 
             for param_name, param in sig.parameters.items():
-                if param_name in ("self", "cls", "kwargs"):
+                if param_name in skip_params:
                     continue
 
                 # 推断类型
@@ -450,6 +469,7 @@ def func_tool(
         # 保存函数引用（避免闭包问题）
         _captured_func = func
         _captured_params = param_list
+        _context_param = context_param
 
         # 创建动态工具类
         class FuncTool(BaseTool):
@@ -463,6 +483,7 @@ def func_tool(
                     tags=tags or [],
                     output_schema=output_schema,
                     compress_function=compress_function,
+                    validate_function=validate_function,
                 )
 
             async def execute(self, **kwargs) -> Any:

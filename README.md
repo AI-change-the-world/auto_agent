@@ -23,11 +23,7 @@ Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主
 
 ### 安装
 
-```bash
-pip install auto-agent
-```
-
-或从源码安装：
+从源码安装：
 
 ```bash
 git clone https://github.com/AI-change-the-world/auto_agent.git
