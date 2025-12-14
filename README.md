@@ -230,7 +230,99 @@ for step in plan.subtasks:
 
 ## 🧠 记忆系统
 
-### 分类记忆 (CategorizedMemory)
+Auto-Agent 提供两套记忆系统：新的 L1/L2/L3 三层架构（推荐）和兼容的旧接口。
+
+### 新架构：三层记忆系统 (推荐) ✨
+
+基于 `docs/MEMORY.md` 设计，支持反馈学习和智能注入：
+
+```python
+from auto_agent import MemorySystem, MemoryCategory, MemorySource
+
+# 初始化统一记忆系统
+memory = MemorySystem(storage_path="./data/memory", token_budget=2000)
+
+user_id = "user_001"
+
+# === L1 短时记忆 (WorkingMemory) ===
+# 单次任务执行上下文，任务结束后可提炼到长期记忆
+task_id = memory.start_task(user_id, "帮我写一篇AI报告")
+wm = memory.get_working_memory(task_id)
+wm.add_decision("使用分层结构", "更易阅读")
+wm.add_tool_call("search", {"query": "AI"}, {"success": True, "count": 10}, step_id="s1")
+# 任务结束，提炼到长期记忆
+memory.end_task(user_id, task_id, promote_to_long_term=True)
+
+# === L2 长期语义记忆 (SemanticMemory) ===
+# JSON 结构化，支持分类、标签、打分、时间衰减
+
+# 添加记忆
+memory.add_memory(
+    user_id=user_id,
+    content="用户偏好简洁的代码风格",
+    category=MemoryCategory.PREFERENCE,
+    tags=["code", "style"],
+    confidence=0.8,
+)
+
+# 便捷方法
+memory.set_preference(user_id, "language", "Python")
+memory.add_knowledge(user_id, "用户熟悉 FastAPI 框架")
+memory.add_strategy(user_id, "先写测试再写代码", is_successful=True)
+
+# 搜索记忆
+results = memory.search_memory(user_id, "Python")
+
+# === 用户反馈驱动学习 ===
+item = memory.add_memory(user_id, "建议使用 async/await")
+
+# 👍 正反馈：提升 confidence 和 reward
+memory.thumbs_up(user_id, item.memory_id)
+
+# 👎 负反馈：降低权重，标记需要修订
+memory.thumbs_down(user_id, item.memory_id, reason="不适用于同步场景")
+
+# === 智能记忆注入 ===
+# 根据查询自动路由和注入相关记忆
+result = memory.get_context_for_query(user_id, "帮我写一个 Python API")
+print(result["context"])  # 注入到 Prompt 的文本
+print(result["token_estimate"])  # 估计 token 数
+print(result["analysis"])  # 查询分析结果
+
+# === L3 叙事记忆 (NarrativeMemory) ===
+# Markdown 格式，高语义密度，用于 Prompt 注入
+reflection = memory.generate_reflection(
+    user_id=user_id,
+    title="编码经验总结",
+    category=MemoryCategory.STRATEGY,
+)
+```
+
+#### 记忆路由器 (MemoryRouter)
+
+自动分析查询，决定注入哪些记忆：
+
+```python
+from auto_agent import MemoryRouter, SemanticMemory, QueryIntent
+
+sm = SemanticMemory()
+router = MemoryRouter(sm, default_token_budget=2000)
+
+# 分析查询意图和领域
+analysis = router.analyze_query("帮我总结一下之前的学习经验")
+print(analysis["intent"])  # QueryIntent.REFLECTION
+print(analysis["categories"])  # [MemoryCategory.STRATEGY, ...]
+
+# 判断是否需要记忆
+should_use, reason = router.should_use_memory("你好")  # False, "简单问候"
+should_use, reason = router.should_use_memory("帮我写代码")  # True, "领域相关"
+
+# 获取注入配置
+config = router.get_memory_injection_config("总结经验")
+# {"use_l3_narrative": True, "token_budget": 3000, "priority": "recency"}
+```
+
+### 旧接口：分类记忆 (CategorizedMemory)
 
 基于 KV 存储的分类记忆系统，支持全文检索：
 
@@ -430,9 +522,15 @@ auto_agent/
 │   │   └── providers/
 │   │       └── openai.py     # OpenAI/DeepSeek 客户端
 │   ├── memory/
-│   │   ├── categorized.py    # 分类记忆系统
-│   │   ├── long_term.py      # 长期记忆
-│   │   └── short_term.py     # 短期记忆（带压缩）
+│   │   ├── system.py         # 统一记忆系统 (新架构)
+│   │   ├── working.py        # L1 短时记忆
+│   │   ├── semantic.py       # L2 长期语义记忆
+│   │   ├── narrative.py      # L3 叙事记忆
+│   │   ├── router.py         # 记忆路由器
+│   │   ├── models.py         # 记忆数据模型
+│   │   ├── categorized.py    # 分类记忆 (旧接口)
+│   │   ├── long_term.py      # 长期记忆 (旧接口)
+│   │   └── short_term.py     # 短期记忆 (旧接口)
 │   ├── session/
 │   │   ├── manager.py        # 会话管理器
 │   │   └── models.py         # 会话数据模型
@@ -448,7 +546,8 @@ auto_agent/
 ├── tests/
 │   ├── test_session.py       # 会话管理测试
 │   ├── test_router.py        # 意图路由测试
-│   ├── test_memory.py        # 记忆系统测试
+│   ├── test_memory.py        # 分类记忆测试
+│   ├── test_memory_system.py # 新记忆系统测试 (L1/L2/L3)
 │   └── test_integration.py   # 集成测试
 ├── pyproject.toml
 └── README.md
@@ -467,7 +566,7 @@ pytest tests/test_memory.py -v
 pytest tests/ --cov=auto_agent --cov-report=html
 ```
 
-当前测试覆盖：49 个测试用例全部通过。
+当前测试覆盖：79 个测试用例全部通过。
 
 ## 📦 API 参考
 
@@ -482,8 +581,13 @@ pytest tests/ --cov=auto_agent --cov-report=html
 | `IntentRouter`             | 意图路由器                 |
 | `TaskPlanner`              | 任务规划器                 |
 | `SessionManager`           | 会话管理器                 |
-| `CategorizedMemory`        | 分类记忆系统               |
-| `ShortTermMemory`          | 短期记忆                   |
+| `MemorySystem`             | 统一记忆系统 (新架构)      |
+| `WorkingMemory`            | L1 短时记忆                |
+| `SemanticMemory`           | L2 长期语义记忆            |
+| `NarrativeMemoryManager`   | L3 叙事记忆                |
+| `MemoryRouter`             | 记忆路由器                 |
+| `CategorizedMemory`        | 分类记忆系统 (旧接口)      |
+| `ShortTermMemory`          | 短期记忆 (旧接口)          |
 | `ExecutionReportGenerator` | 执行报告生成器             |
 | `AgentMarkdownParser`      | Agent Markdown 解析器      |
 
@@ -496,16 +600,19 @@ pytest tests/ --cov=auto_agent --cov-report=html
 
 ### 数据模型
 
-| 模型             | 描述         |
-| ---------------- | ------------ |
-| `ToolDefinition` | 工具定义     |
-| `ToolParameter`  | 工具参数     |
-| `ExecutionPlan`  | 执行计划     |
-| `PlanStep`       | 计划步骤     |
-| `SubTaskResult`  | 子任务结果   |
-| `Session`        | 会话         |
-| `MemoryItem`     | 记忆条目     |
-| `MemoryCategory` | 记忆分类枚举 |
+| 模型                 | 描述            |
+| -------------------- | --------------- |
+| `ToolDefinition`     | 工具定义        |
+| `ToolParameter`      | 工具参数        |
+| `ExecutionPlan`      | 执行计划        |
+| `PlanStep`           | 计划步骤        |
+| `SubTaskResult`      | 子任务结果      |
+| `Session`            | 会话            |
+| `MemoryItem`         | 记忆条目        |
+| `MemoryCategory`     | 记忆分类枚举    |
+| `SemanticMemoryItem` | L2 语义记忆条目 |
+| `UserFeedback`       | 用户反馈        |
+| `QueryIntent`        | 查询意图枚举    |
 
 ## 🤝 贡献指南
 

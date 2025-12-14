@@ -13,7 +13,7 @@ import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
-from auto_agent.memory.models import ConversationMemory, WorkingMemory
+from auto_agent.memory.models import ConversationMemory, WorkingMemoryData as WorkingMemory
 from auto_agent.models import Message
 
 

@@ -21,6 +21,21 @@ from auto_agent.llm.providers.openai import OpenAIClient
 from auto_agent.memory.categorized import CategorizedMemory, MemoryCategory, MemoryItem
 from auto_agent.memory.long_term import LongTermMemory
 from auto_agent.memory.short_term import ShortTermMemory
+# 新记忆系统 (L1/L2/L3 架构)
+from auto_agent.memory.system import MemorySystem
+from auto_agent.memory.working import WorkingMemory
+from auto_agent.memory.semantic import SemanticMemory
+from auto_agent.memory.narrative import NarrativeMemoryManager
+from auto_agent.memory.router import MemoryRouter, QueryIntent
+from auto_agent.memory.models import (
+    MemoryLayer,
+    MemorySource,
+    SemanticMemoryItem,
+    WorkingMemoryItem,
+    NarrativeMemory,
+    UserFeedback,
+    MemoryCategory as NewMemoryCategory,
+)
 from auto_agent.models import (
     AgentResponse,
     ExecutionPlan,
@@ -65,12 +80,25 @@ __all__ = [
     "get_global_registry",
     "ToolDefinition",
     "ToolParameter",
-    # 记忆
+    # 记忆 (旧接口)
     "LongTermMemory",
     "ShortTermMemory",
     "CategorizedMemory",
     "MemoryCategory",
     "MemoryItem",
+    # 记忆 (新架构 L1/L2/L3)
+    "MemorySystem",
+    "WorkingMemory",
+    "SemanticMemory",
+    "NarrativeMemoryManager",
+    "MemoryRouter",
+    "QueryIntent",
+    "MemoryLayer",
+    "MemorySource",
+    "SemanticMemoryItem",
+    "WorkingMemoryItem",
+    "NarrativeMemory",
+    "UserFeedback",
     # 模型
     "Message",
     "PlanStep",
