@@ -1,6 +1,7 @@
 # Auto-Agent 智能体框架
+
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-blue.svg" alt="Version" />
+  <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="Version" />
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python Version" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
@@ -10,18 +11,15 @@ Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主
 ## 🌟 核心特性
 
 - 🤖 **自主规划**：基于 LLM 的任务分解和执行计划生成
-- 🔧 **工具系统**：灵活的工具注册和调用机制
+- 🔧 **工具系统**：灵活的工具注册机制，支持装饰器快速定义
 - 🔄 **重试机制**：智能错误处理和自动重试
-- 🧠 **双层记忆**：长期记忆（用户级）+ 短期记忆（对话级）
-- 📝 **结构化日志**：完整的执行过程追踪
-- 🎯 **意图识别**：自动识别用户意图并路由到合适的处理流程
+- 🧠 **双层记忆**：长期记忆 + 短期记忆（支持智能压缩）
+- 📊 **分类记忆**：用户反馈、行为模式、偏好、知识等分类存储
+- 🎯 **意图路由**：自动识别用户意图并路由到合适的处理流程
+- 📝 **执行报告**：Mermaid 流程图 + Markdown 报告生成
+- 💬 **会话管理**：多轮对话、用户干预、会话持久化
 
 ## 🚀 快速开始
-
-### 环境要求
-
-- Python 3.10+
-- 支持的 LLM 提供商：OpenAI、DeepSeek、Anthropic
 
 ### 安装
 
@@ -29,737 +27,497 @@ Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主
 pip install auto-agent
 ```
 
-或者从源码安装：
+或从源码安装：
 
 ```bash
-git clone https://github.com/your-org/auto-agent.git
-cd auto-agent
-pip install -e .
-```
-
-### 基本使用
-
-```python
-from auto_agent import AutoAgent, LLMClient, ToolRegistry
-from auto_agent.memory import LongTermMemory, ShortTermMemory
-from auto_agent.tools.builtin import CalculatorTool, WebSearchTool
-
-# 初始化
-llm = LLMClient(provider="deepseek", api_key="sk-xxx")
-tool_registry = ToolRegistry()
-tool_registry.register(CalculatorTool())
-tool_registry.register(WebSearchTool())
-
-ltm = LongTermMemory(storage_path="./user_memories")
-stm = ShortTermMemory(backend="sqlite", db_path="./conversations.db")
-
-agent = AutoAgent(
-    llm_client=llm,
-    tool_registry=tool_registry,
-    long_term_memory=ltm,
-    short_term_memory=stm
-)
-
-# 执行任务
-response = await agent.run(
-    query="帮我计算 123 * 456，然后搜索相关的数学知识",
-    user_id="user_001"
-)
-
-print(response.content)
-```
-
-## 🏗️ 架构设计
-
-### 整体架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    User Input                               │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Agent Orchestrator                        │
-│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
-│ │ Intent      │ │ Task         │ │ Memory       │          │
-│ │ Recognizer  │─▶│ Planner      │─▶│ Manager      │          │
-│ └─────────────┘ └──────────────┘ └──────────────┘          │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Execution Engine                         │
-│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
-│ │ Tool        │ │ Retry        │ │ Result       │          │
-│ │ Registry    │─▶│ Controller   │─▶│ Aggregator   │          │
-│ └─────────────┘ └──────────────┘ └──────────────┘          │
-└──────────────────────────┬──────────────────────────────────┘
-                           ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Memory System                         │
-│ ┌─────────────────────┐ ┌─────────────────────┐           │
-│ │ Long-term Memory    │ │ Short-term Memory   │           │
-│ │ (User Profile)      │ │ (Conversation)      │           │
-│ │ - Preferences       │ │ - Context           │           │
-│ │ - History           │ │ - Working Memory    │           │
-│ │ - Knowledge         │ │ - Temp State        │           │
-│ └─────────────────────┘ └─────────────────────┘           │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 核心组件
-
-#### Agent Orchestrator（智能体编排器）
-- **IntentRecognizer**：意图识别和分类
-- **TaskPlanner**：任务分解和执行计划生成
-- **MemoryManager**：记忆的读取和更新
-
-#### Execution Engine（执行引擎）
-- **ToolRegistry**：工具注册表和管理
-- **RetryController**：重试策略和错误处理
-- **ResultAggregator**：结果聚合和格式化
-
-#### Memory System（记忆系统）
-- **LongTermMemory**：持久化用户记忆
-- **ShortTermMemory**：临时对话记忆
-
-## 🧠 详细设计
-
-### 记忆系统设计
-
-#### 3.1.1 长期记忆（Long-term Memory）
-
-**存储格式**：Markdown 文件（每个用户一个文件）
-
-**文件结构**：
-```markdown
-# User Profile: {user_id}
-
-## Basic Information
-- User ID: {user_id}
-- Created At: {timestamp}
-- Last Updated: {timestamp}
-
-## Preferences
-- Language: zh-CN
-- LLM Model: deepseek-v3
-- Response Style: detailed/concise
-
-## Knowledge Base
-### Domain Knowledge
-- [Domain 1]: {description}
-- [Domain 2]: {description}
-
-### Skills
-- [Skill 1]: {proficiency}
-- [Skill 2]: {proficiency}
-
-## Interaction History
-### Key Facts
-- {fact_1}
-- {fact_2}
-
-### Important Decisions
-- {decision_1}: {reasoning}
-- {decision_2}: {reasoning}
-
-## Custom Context
-{user_defined_context}
-API 设计：
-class LongTermMemory:
-    def load_user_memory(self, user_id: str) -> UserMemory
-    def save_user_memory(self, user_id: str, memory: UserMemory)
-    def update_user_memory(self, user_id: str, updates: dict)
-    def search_memory(self, user_id: str, query: str) -> List[MemoryItem]
-    def add_fact(self, user_id: str, fact: str, category: str)
-    def get_relevant_context(self, user_id: str, task: str) -> str
-```
-
-#### 短期记忆（Short-term Memory）
-
-存储方式：内存 + 可选持久化（SQLite/Redis） 数据结构：
-```python
-@dataclass
-class ConversationMemory:
-    conversation_id: str
-    user_id: str
-    messages: List[Message]
-    context: Dict[str, Any]  # 临时上下文
-    working_memory: Dict[str, Any]  # 工作记忆
-    created_at: int
-    updated_at: int
-    
-@dataclass
-class Message:
-    role: str  # user/assistant/system/tool
-    content: str
-    timestamp: int
-    metadata: Dict[str, Any]
-
-@dataclass
-class WorkingMemory:
-    current_task: Optional[Task]
-    task_history: List[Task]
-    tool_results: Dict[str, Any]
-    intermediate_steps: List[Step]
-```
-
-API 设计：
-```python
-class ShortTermMemory:
-    def create_conversation(self, user_id: str) -> str
-    def add_message(self, conversation_id: str, message: Message)
-    def get_conversation_history(self, conversation_id: str, limit: int = 10) -> List[Message]
-    def get_context(self, conversation_id: str) -> Dict[str, Any]
-    def update_context(self, conversation_id: str, context: dict)
-    def get_working_memory(self, conversation_id: str) -> WorkingMemory
-    def clear_working_memory(self, conversation_id: str)
-    def summarize_conversation(self, conversation_id: str) -> str
-```
-### 自主规划系统
-
-#### 任务规划流程
-
-User Query → Intent Recognition → Task Decomposition → Tool Selection → Execution Plan
-
-规划提示词模板：
-
-```python
-PLANNING_PROMPT = """
-You are an intelligent task planner. Given a user query, you need to:
-1. Understand the user's intent
-2. Break down the task into subtasks
-3. Select appropriate tools for each subtask
-4. Generate an execution plan
-
-User Query: {query}
-
-Available Tools:
-{tool_descriptions}
-
-User Context (Long-term Memory):
-{user_context}
-
-Conversation Context (Short-term Memory):
-{conversation_context}
-
-Please generate a detailed execution plan in JSON format:
-{{
-  "intent": "...",
-  "subtasks": [
-    {{
-      "id": 1,
-      "description": "...",
-      "tool": "tool_name",
-      "parameters": {{}},
-      "dependencies": []
-    }}
-  ],
-  "expected_outcome": "..."
-}}
-"""
-```
-
-#### TaskPlanner 实现
-
-```python
-class TaskPlanner:
-    def __init__(self, llm_client: LLMClient, tool_registry: ToolRegistry):
-        self.llm_client = llm_client
-        self.tool_registry = tool_registry
-    
-    async def plan(
-        self,
-        query: str,
-        user_context: str,
-        conversation_context: str
-    ) -> ExecutionPlan:
-        """生成执行计划"""
-        
-    async def replan(
-        self,
-        original_plan: ExecutionPlan,
-        error: Exception,
-        execution_history: List[StepResult]
-    ) -> ExecutionPlan:
-        """根据错误重新规划"""
-```
-### 工具系统设计
-
-#### 工具定义标准
-
-```python
-from typing import Any, Dict, List, Optional, Callable
-from pydantic import BaseModel, Field
-
-class ToolParameter(BaseModel):
-    name: str
-    type: str  # string, number, boolean, object, array
-    description: str
-    required: bool = False
-    default: Any = None
-    enum: Optional[List[Any]] = None
-
-class ToolDefinition(BaseModel):
-    name: str
-    description: str
-    parameters: List[ToolParameter]
-    returns: Dict[str, Any]
-    category: str  # retrieval, analysis, action, etc.
-    examples: List[Dict[str, Any]] = []
-
-class BaseTool:
-    """工具基类"""
-    
-    @property
-    def definition(self) -> ToolDefinition:
-        """返回工具定义"""
-        raise NotImplementedError
-    
-    async def execute(self, **kwargs) -> Dict[str, Any]:
-        """执行工具"""
-        raise NotImplementedError
-    
-    async def validate_input(self, **kwargs) -> bool:
-        """验证输入参数"""
-        pass
-    
-    def get_schema(self) -> Dict[str, Any]:
-        """返回 JSON Schema"""
-        return self.definition.dict()
-```
-#### 工具注册表
-
-```python
-class ToolRegistry:
-    def __init__(self):
-        self._tools: Dict[str, BaseTool] = {}
-        self._categories: Dict[str, List[str]] = {}
-    
-    def register(self, tool: BaseTool):
-        """注册工具"""
-        
-    def unregister(self, tool_name: str):
-        """注销工具"""
-        
-    def get_tool(self, tool_name: str) -> Optional[BaseTool]:
-        """获取工具"""
-        
-    def get_tools_by_category(self, category: str) -> List[BaseTool]:
-        """按类别获取工具"""
-        
-    def get_all_tools(self) -> List[BaseTool]:
-        """获取所有工具"""
-        
-    def get_tool_descriptions(self) -> str:
-        """获取所有工具的描述（用于提示词）"""
-```
-### 重试机制设计
-
-#### 重试策略
-
-```python
-from enum import Enum
-from typing import Optional, Callable
-
-class RetryStrategy(Enum):
-    IMMEDIATE = "immediate"  # 立即重试
-    EXPONENTIAL_BACKOFF = "exponential_backoff"  # 指数退避
-    LINEAR_BACKOFF = "linear_backoff"  # 线性退避
-    ADAPTIVE = "adaptive"  # 自适应（基于 LLM）
-
-class RetryConfig(BaseModel):
-    max_retries: int = 3
-    strategy: RetryStrategy = RetryStrategy.EXPONENTIAL_BACKOFF
-    base_delay: float = 1.0  # 秒
-    max_delay: float = 60.0
-    backoff_factor: float = 2.0
-    retry_on_exceptions: List[type] = []
-    should_retry_callback: Optional[Callable] = None
-
-class RetryController:
-    def __init__(self, config: RetryConfig, llm_client: Optional[LLMClient] = None):
-        self.config = config
-        self.llm_client = llm_client
-    
-    async def execute_with_retry(
-        self,
-        func: Callable,
-        *args,
-        **kwargs
-    ) -> Any:
-        """带重试的执行"""
-        
-    async def should_retry(
-        self,
-        exception: Exception,
-        attempt: int,
-        context: Dict[str, Any]
-    ) -> bool:
-        """判断是否应该重试"""
-        
-    async def analyze_error(
-        self,
-        exception: Exception,
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """使用 LLM 分析错误"""
-        
-    def get_delay(self, attempt: int) -> float:
-        """计算延迟时间"""
-```
-#### 智能重试（基于 LLM）
-
-```python
-ERROR_ANALYSIS_PROMPT = """
-An error occurred during task execution. Please analyze the error and provide suggestions.
-
-Error Type: {error_type}
-Error Message: {error_message}
-Stack Trace: {stack_trace}
-
-Task Context:
-- Task: {task_description}
-- Tool: {tool_name}
-- Parameters: {parameters}
-- Attempt: {attempt}/{max_retries}
-
-Execution History:
-{execution_history}
-
-Please analyze:
-1. Is this error recoverable?
-2. What might be the root cause?
-3. Should we retry? If yes, any parameter adjustments needed?
-4. Alternative approaches?
-
-Respond in JSON format:
-{{
-  "is_recoverable": true/false,
-  "root_cause": "...",
-  "should_retry": true/false,
-  "suggested_changes": {{
-    "parameters": {{}},
-    "alternative_tool": "..."
-  }},
-  "reasoning": "..."
-}}
-"""
-```
-### Agent 执行流程
-
-```python
-class AutoAgent:
-    def __init__(
-        self,
-        llm_client: LLMClient,
-        tool_registry: ToolRegistry,
-        long_term_memory: LongTermMemory,
-        short_term_memory: ShortTermMemory,
-        retry_config: Optional[RetryConfig] = None
-    ):
-        self.llm_client = llm_client
-        self.tool_registry = tool_registry
-        self.ltm = long_term_memory
-        self.stm = short_term_memory
-        self.planner = TaskPlanner(llm_client, tool_registry)
-        self.retry_controller = RetryController(retry_config or RetryConfig())
-    
-    async def run(
-        self,
-        query: str,
-        user_id: str,
-        conversation_id: Optional[str] = None,
-        stream: bool = False
-    ) -> AgentResponse:
-        """
-        执行流程：
-        1. 加载用户长期记忆
-        2. 加载或创建对话短期记忆
-        3. 意图识别
-        4. 任务规划
-        5. 执行计划（带重试）
-        6. 结果聚合
-        7. 更新记忆
-        8. 返回响应
-        """
-        
-        # Step 1: Load memories
-        user_context = self.ltm.get_relevant_context(user_id, query)
-        
-        if not conversation_id:
-            conversation_id = self.stm.create_conversation(user_id)
-        
-        conversation_context = self.stm.get_context(conversation_id)
-        
-        # Step 2: Add user message
-        self.stm.add_message(conversation_id, Message(
-            role="user",
-            content=query,
-            timestamp=int(time.time()),
-            metadata={}
-        ))
-        
-        # Step 3: Plan
-        plan = await self.planner.plan(
-            query=query,
-            user_context=user_context,
-            conversation_context=conversation_context
-        )
-        
-        # Step 4: Execute with retry
-        results = []
-        for subtask in plan.subtasks:
-            try:
-                result = await self.retry_controller.execute_with_retry(
-                    self._execute_subtask,
-                    subtask=subtask,
-                    conversation_id=conversation_id
-                )
-                results.append(result)
-            except Exception as e:
-                # Replan if needed
-                plan = await self.planner.replan(plan, e, results)
-                # Continue or abort based on replan
-        
-        # Step 5: Aggregate results
-        final_response = await self._aggregate_results(results, plan)
-        
-        # Step 6: Update memories
-        self.stm.add_message(conversation_id, Message(
-            role="assistant",
-            content=final_response,
-            timestamp=int(time.time()),
-            metadata={"plan": plan.dict(), "results": results}
-        ))
-        
-        # Step 7: Extract and save important facts to LTM
-        await self._update_long_term_memory(user_id, conversation_id, plan, results)
-        
-        return AgentResponse(
-            content=final_response,
-            conversation_id=conversation_id,
-            plan=plan,
-            execution_results=results
-        )
-```
-## 📁 目录结构
-
-```
-auto-agent/
-├── auto_agent/
-│   ├── __init__.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── agent.py              # AutoAgent 主类
-│   │   ├── orchestrator.py       # 编排器
-│   │   ├── planner.py            # 任务规划器
-│   │   └── executor.py           # 执行引擎
-│   ├── memory/
-│   │   ├── __init__.py
-│   │   ├── base.py               # 记忆基类
-│   │   ├── long_term.py          # 长期记忆
-│   │   ├── short_term.py         # 短期记忆
-│   │   ├── storage/
-│   │   │   ├── __init__.py
-│   │   │   ├── markdown.py       # Markdown 存储
-│   │   │   ├── sqlite.py         # SQLite 存储
-│   │   │   └── redis.py          # Redis 存储
-│   │   └── models.py             # 记忆数据模型
-│   ├── tools/
-│   │   ├── __init__.py
-│   │   ├── base.py               # 工具基类
-│   │   ├── registry.py           # 工具注册表
-│   │   ├── builtin/              # 内置工具
-│   │   │   ├── __init__.py
-│   │   │   ├── calculator.py
-│   │   │   ├── web_search.py
-│   │   │   └── code_executor.py
-│   │   └── models.py             # 工具数据模型
-│   ├── retry/
-│   │   ├── __init__.py
-│   │   ├── controller.py         # 重试控制器
-│   │   ├── strategies.py         # 重试策略
-│   │   └── models.py             # 重试配置模型
-│   ├── llm/
-│   │   ├── __init__.py
-│   │   ├── client.py             # LLM 客户端抽象
-│   │   ├── providers/
-│   │   │   ├── __init__.py
-│   │   │   ├── openai.py
-│   │   │   ├── deepseek.py
-│   │   │   └── anthropic.py
-│   │   └── prompts.py            # 提示词模板
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── logger.py             # 日志工具
-│   │   ├── serialization.py      # 序列化工具
-│   │   └── validators.py         # 验证工具
-│   └── models.py                 # 公共数据模型
-├── tests/
-│   ├── __init__.py
-│   ├── test_agent.py
-│   ├── test_memory.py
-│   ├── test_tools.py
-│   └── test_retry.py
-├── examples/
-│   ├── basic_usage.py
-│   ├── custom_tool.py
-│   ├── memory_demo.py
-│   └── advanced_planning.py
-├── docs/
-│   ├── index.md
-│   ├── quickstart.md
-│   ├── concepts.md
-│   ├── api_reference.md
-│   └── examples.md
-├── pyproject.toml
-├── setup.py
-├── README.md
-├── LICENSE
-└── .gitignore
-```
-## 🛠️ 技术栈
-
-- **Python**: 3.10+
-- **核心依赖**:
-  - `pydantic`: 数据验证
-  - `asyncio`: 异步编程
-  - `httpx`: HTTP 客户端
-  - `tenacity`: 重试库（可选，也可自己实现）
-- **存储**:
-  - `aiosqlite`: SQLite 异步支持
-  - `redis`: Redis 客户端
-  - 文件系统（Markdown）
-- **LLM**:
-  - `openai`: OpenAI SDK
-  - 支持兼容 OpenAI API 的其他提供商
-- **日志**:
-  - `loguru`: 强大的日志库
-## 📖 使用示例
-
-### 基础使用
-
-```python
-from auto_agent import AutoAgent, LLMClient, ToolRegistry
-from auto_agent.memory import LongTermMemory, ShortTermMemory
-from auto_agent.tools.builtin import CalculatorTool, WebSearchTool
-
-# 初始化
-llm = LLMClient(provider="deepseek", api_key="sk-xxx")
-tool_registry = ToolRegistry()
-tool_registry.register(CalculatorTool())
-tool_registry.register(WebSearchTool())
-
-ltm = LongTermMemory(storage_path="./user_memories")
-stm = ShortTermMemory(backend="sqlite", db_path="./conversations.db")
-
-agent = AutoAgent(
-    llm_client=llm,
-    tool_registry=tool_registry,
-    long_term_memory=ltm,
-    short_term_memory=stm
-)
-
-# 执行任务
-response = await agent.run(
-    query="帮我计算 123 * 456，然后搜索相关的数学知识",
-    user_id="user_001"
-)
-
-print(response.content)
-```
-### 自定义工具
-
-```python
-from auto_agent.tools import BaseTool, ToolDefinition, ToolParameter
-
-class CustomTool(BaseTool):
-    @property
-    def definition(self) -> ToolDefinition:
-        return ToolDefinition(
-            name="custom_tool",
-            description="My custom tool",
-            parameters=[
-                ToolParameter(
-                    name="input",
-                    type="string",
-                    description="Input data",
-                    required=True
-                )
-            ],
-            returns={"type": "object"},
-            category="custom"
-        )
-    
-    async def execute(self, input: str) -> dict:
-        # Your implementation
-        return {"result": f"Processed: {input}"}
-
-# 注册
-tool_registry.register(CustomTool())
-```
-### 长期记忆管理
-
-```python
-# 更新用户偏好
-ltm.update_user_memory("user_001", {
-    "preferences": {
-        "language": "zh-CN",
-        "response_style": "detailed"
-    }
-})
-
-# 添加知识
-ltm.add_fact(
-    user_id="user_001",
-    fact="用户是一名 Python 开发者，擅长 FastAPI 和异步编程",
-    category="skills"
-)
-
-# 获取相关上下文
-context = ltm.get_relevant_context(
-    user_id="user_001",
-    task="帮我写一个 FastAPI 接口"
-)
-```
-
-## 🤝 贡献指南
-
-我们欢迎社区贡献！如果您想为 Auto-Agent 做出贡献，请遵循以下步骤：
-
-1. Fork 项目仓库
-2. 创建您的功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 开发环境设置
-
-```bash
-git clone https://github.com/your-org/auto-agent.git
-cd auto-agent
+git clone https://github.com/AI-change-the-world/auto_agent.git
+cd auto_agent
 pip install -e ".[dev]"
 ```
 
-### 运行测试
+### 环境配置
+
+```bash
+# DeepSeek (推荐)
+export DEEPSEEK_API_KEY=your-api-key
+
+# 或 OpenAI
+export OPENAI_API_KEY=your-api-key
+export OPENAI_BASE_URL=https://api.openai.com/v1
+export OPENAI_MODEL=gpt-4o-mini
+```
+
+### 运行示例
+
+```bash
+# 完整功能演示
+python examples/full_demo.py
+
+# 文档写作智能体示例
+python examples/writer_agent_demo.py
+```
+
+## 🔧 工具定义
+
+Auto-Agent 提供三种工具定义方式，从简单到复杂：
+
+### 方式 1: 函数装饰器（最简洁）✨
+
+```python
+from auto_agent import func_tool
+
+@func_tool(name="calculator", description="简单计算器", category="math")
+async def calculator(expression: str, precision: int = 2) -> dict:
+    """
+    计算数学表达式
+    
+    Args:
+        expression: 数学表达式，如 "1 + 2 * 3"
+        precision: 小数精度
+    """
+    result = eval(expression)
+    return {"success": True, "result": round(result, precision)}
+
+@func_tool(name="search_docs", description="搜索文档")
+async def search_docs(query: str, limit: int = 10) -> dict:
+    # 搜索逻辑...
+    return {"success": True, "documents": [...], "count": 5}
+```
+
+### 方式 2: 类装饰器（带验证/压缩）
+
+```python
+from auto_agent import tool, BaseTool, ToolDefinition, ToolParameter
+
+# 自定义压缩函数（避免上下文溢出）
+def compress_search(result, state):
+    return {
+        "success": result.get("success"),
+        "document_ids": result.get("document_ids", [])[:20],
+        "count": len(result.get("document_ids", [])),
+    }
+
+@tool(
+    name="es_search",
+    description="全文检索",
+    category="retrieval",
+    compress_function=compress_search,
+)
+class ESSearchTool(BaseTool):
+    async def execute(self, query: str, size: int = 10, **kwargs) -> dict:
+        # 检索逻辑...
+        return {"success": True, "document_ids": [...], "documents": [...]}
+```
+
+### 方式 3: 继承 BaseTool（完全控制）
+
+```python
+from auto_agent import BaseTool, ToolDefinition, ToolParameter
+
+class AnalyzeInputTool(BaseTool):
+    def __init__(self, llm_client):
+        self.llm_client = llm_client
+
+    @property
+    def definition(self) -> ToolDefinition:
+        return ToolDefinition(
+            name="analyze_input",
+            description="分析用户输入，识别意图和关键信息",
+            parameters=[
+                ToolParameter(name="query", type="string", description="用户输入", required=True),
+            ],
+            category="analysis",
+        )
+
+    async def execute(self, query: str, **kwargs) -> dict:
+        # 使用 LLM 分析...
+        return {"success": True, "intent": "写作", "topic": "AI"}
+```
+
+### 工具注册
+
+```python
+from auto_agent import ToolRegistry, get_global_registry
+
+# 方式 1: 使用全局注册表（装饰器自动注册）
+registry = get_global_registry()
+
+# 方式 2: 手动注册到自定义注册表
+registry = ToolRegistry()
+registry.register(AnalyzeInputTool(llm_client))
+registry.register(ESSearchTool())
+```
+
+
+## 🎯 IntentRouter vs TaskPlanner
+
+Auto-Agent 提供两个核心组件用于处理用户请求：
+
+| 组件     | IntentRouter (意图路由器)                 | TaskPlanner (任务规划器)           |
+| -------- | ----------------------------------------- | ---------------------------------- |
+| **职责** | 识别用户意图，选择哪个 Agent/Handler 处理 | 规划具体执行步骤，决定调用哪些工具 |
+| **输出** | 单一结果：handler_name + confidence       | 多步骤计划：steps[] + state_schema |
+| **粒度** | 粗粒度（选择处理器）                      | 细粒度（编排工具链）               |
+| **时机** | 请求入口，第一步                          | 确定 Agent 后，规划执行流程        |
+
+### 典型流程
+
+```
+用户输入: "帮我写一篇AI报告"
+         ↓
+    IntentRouter
+         ↓ 路由到 "writer" Agent
+    TaskPlanner
+         ↓ 规划步骤
+    [analyze_input → search → outline → compose]
+         ↓
+    执行工具链
+```
+
+### IntentRouter 使用示例
+
+```python
+from auto_agent import IntentRouter, OpenAIClient
+
+# 初始化
+llm = OpenAIClient(api_key="sk-xxx")
+router = IntentRouter(llm_client=llm, default_handler="chat")
+
+# 注册处理器
+router.register(
+    name="writer",
+    description="文档写作，包括报告、文章、笔记等",
+    keywords=["写", "撰写", "文档", "报告", "文章"],
+)
+router.register(
+    name="search",
+    description="信息检索和搜索",
+    keywords=["搜索", "查找", "检索"],
+)
+router.register(
+    name="qa",
+    description="问答和知识查询",
+    keywords=["什么是", "如何", "为什么"],
+)
+
+# 路由
+result = await router.route("帮我写一篇关于AI的调研报告")
+print(f"路由到: {result.handler_name}, 置信度: {result.confidence}")
+# 输出: 路由到: writer, 置信度: 0.70
+```
+
+### TaskPlanner 使用示例
+
+```python
+from auto_agent.core.planner import TaskPlanner
+
+planner = TaskPlanner(
+    llm_client=llm,
+    tool_registry=registry,
+    agent_goals=["理解用户需求", "生成高质量文档"],
+    agent_constraints=["文档不超过5000字"],
+)
+
+plan = await planner.plan(
+    query="写一篇AI医疗报告",
+    user_context="用户是技术人员",
+    conversation_context="",
+)
+
+for step in plan.subtasks:
+    print(f"Step {step.id}: {step.tool} - {step.description}")
+```
+
+## 🧠 记忆系统
+
+### 分类记忆 (CategorizedMemory)
+
+基于 KV 存储的分类记忆系统，支持全文检索：
+
+```python
+from auto_agent import CategorizedMemory, MemoryCategory
+
+memory = CategorizedMemory(storage_path="./data/memories")
+
+user_id = "user_001"
+
+# 设置用户偏好
+memory.set_preference(user_id, "language", "中文")
+memory.set_preference(user_id, "style", "专业")
+
+# 记录用户反馈
+memory.add_feedback(user_id, "响应速度很快", rating=5)
+
+# 记录用户行为
+memory.add_behavior(user_id, "write_document", {"topic": "AI"})
+
+# 添加知识
+memory.add_knowledge(user_id, "用户熟悉 Python 编程", tags=["技能", "Python"])
+
+# 搜索记忆
+results = memory.search(user_id, "Python")
+for item in results:
+    print(f"[{item.category.value}] {item.key}: {item.value}")
+
+# 获取上下文摘要（用于 LLM）
+context = memory.get_context_summary(user_id)
+print(context)
+```
+
+### 短期记忆 (ShortTermMemory)
+
+对话级记忆，支持智能压缩：
+
+```python
+from auto_agent import ShortTermMemory
+
+stm = ShortTermMemory(max_context_chars=5000)
+
+# 压缩执行状态（避免上下文溢出）
+compressed = stm.summarize_state(
+    state={"documents": large_doc_list},
+    step_history=execution_history,
+    target_tool_name="compose_document",
+    max_steps=5,
+)
+# 原始 22690 字符 → 压缩后 1504 字符 (93.4% 压缩率)
+```
+
+## 💬 会话管理
+
+```python
+from auto_agent import SessionManager, SessionStatus
+
+session_mgr = SessionManager(default_ttl=1800)  # 30分钟过期
+
+# 创建会话
+session = session_mgr.create_session(
+    user_id="user_001",
+    initial_query="帮我写一篇技术文档",
+)
+
+# 添加消息
+session_mgr.add_message(session.session_id, "assistant", "好的，请问主题是什么？")
+
+# 等待用户输入
+session_mgr.wait_for_input(session.session_id, "请提供文档主题")
+# session.status == SessionStatus.WAITING_INPUT
+
+# 用户回复后恢复
+session_mgr.resume_session(session.session_id, "关于 Python 异步编程")
+# session.status == SessionStatus.ACTIVE
+
+# 获取对话历史
+history = session_mgr.get_conversation_history(session.session_id)
+
+# 完成会话
+session_mgr.complete_session(session.session_id, "文档生成完成！")
+```
+
+## 📊 执行报告
+
+```python
+from auto_agent import ExecutionReportGenerator, ExecutionPlan, PlanStep, SubTaskResult
+
+# 生成报告数据
+report_data = ExecutionReportGenerator.generate_report_data(
+    agent_name="文档写作智能体",
+    query="写一篇AI报告",
+    plan=plan,
+    results=results,
+    state=final_state,
+)
+
+# 获取 Mermaid 流程图
+print(report_data["mermaid_diagram"])
+# graph TD
+#     Start([开始]) --> Step1
+#     Step1[analyze_input] --> Step2
+#     Step2[search_documents] --> Step3
+#     ...
+
+# 生成 Markdown 报告
+markdown = ExecutionReportGenerator.generate_markdown_report(report_data)
+```
+
+## 📝 Agent Markdown 定义
+
+支持使用 Markdown 定义 Agent：
+
+```python
+from auto_agent import AgentMarkdownParser, OpenAIClient
+
+agent_md = """
+## 文档写作智能体
+
+你需要按以下步骤完成用户的需求：
+
+1. 调用 [analyze_input] 工具，分析用户意图
+2. 调用 [es_fulltext_search] 工具，检索相关文档
+3. 调用 [generate_outline] 工具，生成大纲
+4. 调用 [document_compose] 工具，撰写文档
+
+### 目标
+- 理解用户的写作需求
+- 生成结构清晰的文档
+
+### 约束
+- 文档长度不超过5000字
+"""
+
+llm = OpenAIClient(api_key="sk-xxx")
+parser = AgentMarkdownParser(llm_client=llm)
+result = await parser.parse(agent_md)
+
+if result["success"]:
+    agent_def = result["agent"]
+    print(f"Agent: {agent_def.name}")
+    print(f"Goals: {agent_def.goals}")
+    print(f"Steps: {[s.tool for s in agent_def.initial_plan]}")
+```
+
+
+## 🏗️ 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      User Input                             │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    IntentRouter                             │
+│         识别意图，选择 Agent/Handler                         │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    TaskPlanner                              │
+│         规划执行步骤，编排工具链                              │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                  Execution Engine                           │
+│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
+│ │ Tool        │ │ Retry        │ │ Result       │          │
+│ │ Registry    │→│ Controller   │→│ Compressor   │          │
+│ └─────────────┘ └──────────────┘ └──────────────┘          │
+└──────────────────────────┬──────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Memory System                            │
+│ ┌───────────────────┐ ┌───────────────────┐                │
+│ │ CategorizedMemory │ │ ShortTermMemory   │                │
+│ │ (用户级持久化)     │ │ (对话级+压缩)     │                │
+│ └───────────────────┘ └───────────────────┘                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 📁 目录结构
+
+```
+auto_agent/
+├── auto_agent/
+│   ├── __init__.py           # 主入口，导出所有公共 API
+│   ├── models.py             # 公共数据模型
+│   ├── core/
+│   │   ├── agent.py          # AutoAgent 主类
+│   │   ├── planner.py        # TaskPlanner 任务规划器
+│   │   ├── editor/           # Agent Markdown 解析
+│   │   ├── report/           # 执行报告生成
+│   │   └── router/           # IntentRouter 意图路由
+│   ├── llm/
+│   │   ├── client.py         # LLM 客户端抽象基类
+│   │   ├── prompts.py        # 提示词模板
+│   │   └── providers/
+│   │       └── openai.py     # OpenAI/DeepSeek 客户端
+│   ├── memory/
+│   │   ├── categorized.py    # 分类记忆系统
+│   │   ├── long_term.py      # 长期记忆
+│   │   └── short_term.py     # 短期记忆（带压缩）
+│   ├── session/
+│   │   ├── manager.py        # 会话管理器
+│   │   └── models.py         # 会话数据模型
+│   ├── tools/
+│   │   ├── base.py           # 工具基类
+│   │   └── registry.py       # 工具注册表 + 装饰器
+│   ├── retry/
+│   │   └── models.py         # 重试配置
+│   └── utils/
+├── examples/
+│   ├── full_demo.py          # 完整功能演示
+│   └── writer_agent_demo.py  # 文档写作智能体示例
+├── tests/
+│   ├── test_session.py       # 会话管理测试
+│   ├── test_router.py        # 意图路由测试
+│   ├── test_memory.py        # 记忆系统测试
+│   └── test_integration.py   # 集成测试
+├── pyproject.toml
+└── README.md
+```
+
+## 🧪 测试
 
 ```bash
 # 运行所有测试
-pytest
+pytest tests/ -v
 
 # 运行特定测试
-pytest tests/test_agent.py
+pytest tests/test_memory.py -v
+
+# 查看覆盖率
+pytest tests/ --cov=auto_agent --cov-report=html
 ```
+
+当前测试覆盖：49 个测试用例全部通过。
+
+## 📦 API 参考
+
+### 核心类
+
+| 类名                       | 描述                       |
+| -------------------------- | -------------------------- |
+| `AutoAgent`                | 智能体主类                 |
+| `OpenAIClient`             | OpenAI/DeepSeek LLM 客户端 |
+| `ToolRegistry`             | 工具注册表                 |
+| `BaseTool`                 | 工具基类                   |
+| `IntentRouter`             | 意图路由器                 |
+| `TaskPlanner`              | 任务规划器                 |
+| `SessionManager`           | 会话管理器                 |
+| `CategorizedMemory`        | 分类记忆系统               |
+| `ShortTermMemory`          | 短期记忆                   |
+| `ExecutionReportGenerator` | 执行报告生成器             |
+| `AgentMarkdownParser`      | Agent Markdown 解析器      |
+
+### 装饰器
+
+| 装饰器       | 描述                          |
+| ------------ | ----------------------------- |
+| `@func_tool` | 函数工具装饰器（最简洁）      |
+| `@tool`      | 类工具装饰器（支持验证/压缩） |
+
+### 数据模型
+
+| 模型             | 描述         |
+| ---------------- | ------------ |
+| `ToolDefinition` | 工具定义     |
+| `ToolParameter`  | 工具参数     |
+| `ExecutionPlan`  | 执行计划     |
+| `PlanStep`       | 计划步骤     |
+| `SubTaskResult`  | 子任务结果   |
+| `Session`        | 会话         |
+| `MemoryItem`     | 记忆条目     |
+| `MemoryCategory` | 记忆分类枚举 |
+
+## 🤝 贡献指南
+
+1. Fork 项目仓库
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 📞 联系我们
-
-- 项目维护者: Auto-Agent Team
-- GitHub Issues: [https://github.com/your-org/auto-agent/issues](https://github.com/your-org/auto-agent/issues)
-- 邮箱: team@example.com
+MIT License - 查看 [LICENSE](LICENSE) 文件了解详情。
 
 ---
 

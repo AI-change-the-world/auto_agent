@@ -323,3 +323,170 @@ def tool(
         return cls
 
     return decorator
+
+
+def func_tool(
+    name: str,
+    description: str,
+    category: str = "general",
+    tags: Optional[List[str]] = None,
+    parameters: Optional[List[Dict[str, Any]]] = None,
+    output_schema: Optional[Dict[str, Any]] = None,
+    compress_function: Optional[Callable] = None,
+    auto_register: bool = True,
+):
+    """
+    函数工具装饰器 - 最简洁的工具定义方式
+
+    直接装饰一个 async 函数，自动从函数签名推断参数。
+    也可以手动指定 parameters 覆盖自动推断。
+
+    使用示例：
+    ```python
+    # 方式1: 自动推断参数（从函数签名 + docstring）
+    @func_tool(name="calculator", description="简单计算器", category="math")
+    async def calculator(expression: str, precision: int = 2) -> dict:
+        '''
+        计算数学表达式
+
+        Args:
+            expression: 数学表达式，如 "1 + 2 * 3"
+            precision: 小数精度
+        '''
+        result = eval(expression)
+        return {"success": True, "result": round(result, precision)}
+
+    # 方式2: 手动指定参数（更精确的描述）
+    @func_tool(
+        name="search",
+        description="搜索文档",
+        parameters=[
+            {"name": "query", "type": "string", "description": "搜索关键词", "required": True},
+            {"name": "limit", "type": "integer", "description": "返回数量", "required": False, "default": 10},
+        ],
+    )
+    async def search_docs(query: str, limit: int = 10) -> dict:
+        return {"success": True, "documents": [...]}
+    ```
+
+    Args:
+        name: 工具名称
+        description: 工具描述
+        category: 工具类别
+        tags: 标签列表
+        parameters: 参数定义列表（可选，不提供则自动推断）
+        output_schema: 输出结构定义
+        compress_function: 自定义结果压缩函数
+        auto_register: 是否自动注册到全局注册表
+    """
+
+    def decorator(func: Callable):
+        param_list = []
+
+        # 如果手动指定了 parameters，使用手动指定的
+        if parameters:
+            for p in parameters:
+                param_list.append(
+                    ToolParameter(
+                        name=p.get("name", ""),
+                        type=p.get("type", "string"),
+                        description=p.get("description", ""),
+                        required=p.get("required", False),
+                        default=p.get("default"),
+                        enum=p.get("enum"),
+                    )
+                )
+        else:
+            # 从函数签名推断参数
+            sig = inspect.signature(func)
+
+            # 类型映射
+            type_map = {
+                str: "string",
+                int: "integer",
+                float: "number",
+                bool: "boolean",
+                list: "array",
+                dict: "object",
+            }
+
+            for param_name, param in sig.parameters.items():
+                if param_name in ("self", "cls", "kwargs"):
+                    continue
+
+                # 推断类型
+                param_type = "string"
+                if param.annotation != inspect.Parameter.empty:
+                    param_type = type_map.get(param.annotation, "string")
+
+                # 判断是否必需
+                required = param.default == inspect.Parameter.empty
+
+                # 获取默认值
+                default = None if required else param.default
+
+                param_list.append(
+                    ToolParameter(
+                        name=param_name,
+                        type=param_type,
+                        description="",  # 可以从 docstring 解析
+                        required=required,
+                        default=default,
+                    )
+                )
+
+            # 尝试从 docstring 解析参数描述
+            if func.__doc__:
+                import re
+
+                doc = func.__doc__
+                for p in param_list:
+                    # 匹配 "param_name: description"
+                    pattern = rf"{p.name}[^:]*:\s*(.+?)(?:\n|$)"
+                    match = re.search(pattern, doc)
+                    if match:
+                        p.description = match.group(1).strip()
+
+        # 保存函数引用（避免闭包问题）
+        _captured_func = func
+        _captured_params = param_list
+
+        # 创建动态工具类
+        class FuncTool(BaseTool):
+            @property
+            def definition(self) -> ToolDefinition:
+                return ToolDefinition(
+                    name=name,
+                    description=description,
+                    parameters=_captured_params,
+                    category=category,
+                    tags=tags or [],
+                    output_schema=output_schema,
+                    compress_function=compress_function,
+                )
+
+            async def execute(self, **kwargs) -> Any:
+                import asyncio
+
+                if asyncio.iscoroutinefunction(_captured_func):
+                    return await _captured_func(**kwargs)
+                else:
+                    return _captured_func(**kwargs)
+
+        # 设置类名
+        FuncTool.__name__ = f"{name.title().replace('_', '')}Tool"
+        FuncTool.__qualname__ = FuncTool.__name__
+
+        # 自动注册
+        if auto_register:
+            instance = FuncTool()
+            registry = get_global_registry()
+            registry.register(instance)
+
+        # 保存工具实例到函数属性，方便访问
+        func._tool_instance = FuncTool() if not auto_register else registry.get_tool(name)
+        func._tool_class = FuncTool
+
+        return func
+
+    return decorator

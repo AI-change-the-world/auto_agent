@@ -13,7 +13,12 @@ Auto-Agent 智能体框架
 """
 
 from auto_agent.core.agent import AutoAgent
+from auto_agent.core.editor.parser import AgentDefinition, AgentMarkdownParser
+from auto_agent.core.report.generator import ExecutionReportGenerator
+from auto_agent.core.router.intent import IntentHandler, IntentResult, IntentRouter
 from auto_agent.llm.client import LLMClient
+from auto_agent.llm.providers.openai import OpenAIClient
+from auto_agent.memory.categorized import CategorizedMemory, MemoryCategory, MemoryItem
 from auto_agent.memory.long_term import LongTermMemory
 from auto_agent.memory.short_term import ShortTermMemory
 from auto_agent.models import (
@@ -28,8 +33,10 @@ from auto_agent.models import (
     ValidationMode,
 )
 from auto_agent.retry.models import RetryConfig, RetryStrategy
+from auto_agent.session.manager import SessionManager
+from auto_agent.session.models import Session, SessionStatus
 from auto_agent.tools.base import BaseTool
-from auto_agent.tools.registry import ToolRegistry, get_global_registry, tool
+from auto_agent.tools.registry import ToolRegistry, get_global_registry, tool, func_tool
 
 __version__ = "0.1.0"
 
@@ -37,16 +44,33 @@ __all__ = [
     # 核心
     "AutoAgent",
     "LLMClient",
+    "OpenAIClient",
+    # 报告和编辑
+    "ExecutionReportGenerator",
+    "AgentMarkdownParser",
+    "AgentDefinition",
+    # 路由
+    "IntentRouter",
+    "IntentHandler",
+    "IntentResult",
+    # 会话
+    "SessionManager",
+    "Session",
+    "SessionStatus",
     # 工具
     "ToolRegistry",
     "BaseTool",
     "tool",
+    "func_tool",
     "get_global_registry",
     "ToolDefinition",
     "ToolParameter",
     # 记忆
     "LongTermMemory",
     "ShortTermMemory",
+    "CategorizedMemory",
+    "MemoryCategory",
+    "MemoryItem",
     # 模型
     "Message",
     "PlanStep",

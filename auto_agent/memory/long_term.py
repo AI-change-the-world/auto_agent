@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from auto_agent.memory.base import BaseMemory
 from auto_agent.memory.models import UserMemory

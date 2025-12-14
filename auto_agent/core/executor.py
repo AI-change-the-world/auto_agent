@@ -114,6 +114,11 @@ class ExecutionEngine:
     ) -> SubTaskResult:
         """
         执行单个子任务（带重试和验证）
+
+        参数构造逻辑：
+        1. 如果有 read_fields，从 state 中读取数据
+        2. 合并 subtask.parameters 中的静态参数
+        3. 如果有 LLM client，可以动态构造参数
         """
         # 如果没有指定工具，直接返回成功
         if not subtask.tool:
@@ -132,11 +137,14 @@ class ExecutionEngine:
                 error=f"工具未找到: {subtask.tool}",
             )
 
+        # 构造工具参数（从 state 读取 + 静态参数合并）
+        arguments = await self._build_tool_arguments(subtask, state, tool)
+
         # 执行工具（带重试）
         try:
             output = await self.retry_controller.execute_with_retry(
                 tool.execute,
-                **subtask.parameters,
+                **arguments,
             )
 
             # 验证期望
@@ -287,6 +295,228 @@ class ExecutionEngine:
 
         # 默认：使用 fallback
         return FailAction(type="fallback")
+
+    async def _build_tool_arguments(
+        self,
+        subtask: PlanStep,
+        state: Dict[str, Any],
+        tool: Any,
+    ) -> Dict[str, Any]:
+        """
+        构造工具参数
+
+        逻辑：
+        1. 从 state 中读取 read_fields 指定的字段
+        2. 合并 subtask.parameters 中的静态参数
+        3. 如果有 parameter_template，使用模板变量替换
+        4. 如果有 LLM client 且参数不完整，尝试动态构造
+
+        Args:
+            subtask: 计划步骤
+            state: 当前状态
+            tool: 工具实例
+
+        Returns:
+            工具参数字典
+        """
+        arguments = {}
+
+        # 1. 从 state 中读取 read_fields
+        if subtask.read_fields:
+            for field in subtask.read_fields:
+                if field in state:
+                    arguments[field] = state[field]
+                # 支持嵌套字段，如 "inputs.query"
+                elif "." in field:
+                    value = self._get_nested_value(state, field)
+                    if value is not None:
+                        # 使用最后一个字段名作为参数名
+                        param_name = field.split(".")[-1]
+                        arguments[param_name] = value
+
+        # 2. 合并静态参数（优先级更高）
+        if subtask.parameters:
+            arguments.update(subtask.parameters)
+
+        # 3. 处理 parameter_template（模板变量替换）
+        if subtask.parameter_template and subtask.template_variables:
+            for param_name, template in subtask.parameter_template.items():
+                if isinstance(template, str) and "{" in template:
+                    # 简单模板替换
+                    value = template
+                    for var_name, var_path in subtask.template_variables.items():
+                        var_value = self._get_nested_value(state, var_path)
+                        if var_value is not None:
+                            value = value.replace(f"{{{var_name}}}", str(var_value))
+                    arguments[param_name] = value
+
+        # 4. 处理 pinned_parameters（固定参数，最高优先级）
+        if subtask.pinned_parameters:
+            arguments.update(subtask.pinned_parameters)
+
+        # 5. 如果有 LLM client 且参数可能不完整，尝试动态构造
+        if self.llm_client and not arguments:
+            arguments = await self._build_arguments_with_llm(subtask, state, tool)
+
+        # 6. Fallback：使用简单规则构造参数
+        if not arguments:
+            arguments = self._build_arguments_fallback(subtask, state)
+
+        return arguments
+
+    async def _build_arguments_with_llm(
+        self,
+        subtask: PlanStep,
+        state: Dict[str, Any],
+        tool: Any,
+    ) -> Dict[str, Any]:
+        """
+        使用 LLM 动态构造工具参数
+
+        Args:
+            subtask: 计划步骤
+            state: 当前状态
+            tool: 工具实例
+
+        Returns:
+            工具参数字典
+        """
+        import json
+
+        # 获取工具参数 schema
+        tool_def = tool.definition
+        params_info = []
+        for p in tool_def.parameters:
+            params_info.append({
+                "name": p.name,
+                "type": p.type,
+                "description": p.description,
+                "required": p.required,
+            })
+
+        # 压缩状态信息
+        state_summary = self._compress_state_for_llm(state)
+
+        prompt = f"""根据执行状态，为工具构造参数。
+
+工具: {subtask.tool}
+描述: {subtask.description}
+
+参数定义:
+{json.dumps(params_info, ensure_ascii=False, indent=2)}
+
+当前状态:
+{state_summary}
+
+请返回 JSON 格式的参数，只包含参数定义中的字段。"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+
+            # 提取 JSON
+            import re
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+        except Exception:
+            pass
+
+        return {}
+
+    def _build_arguments_fallback(
+        self,
+        subtask: PlanStep,
+        state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        参数构造的 fallback 逻辑
+
+        使用简单规则从状态中提取参数
+        """
+        arguments = {}
+        tool_name = subtask.tool
+
+        # 通用参数
+        if "inputs" in state:
+            inputs = state["inputs"]
+            if "query" in inputs:
+                arguments["query"] = inputs["query"]
+            if "template_id" in inputs:
+                arguments["template_id"] = inputs["template_id"]
+
+        # 根据工具类型添加特定参数
+        if tool_name in ["generate_outline"]:
+            pass  # query 已经添加
+
+        elif tool_name in ["multi_query_search", "es_fulltext_search", "search_documents"]:
+            if "outline" in state:
+                outline = state["outline"]
+                sections = outline.get("sections", [])
+                if sections:
+                    queries = [s.get("title", "") for s in sections if s.get("title")]
+                    arguments["queries"] = queries
+
+        elif tool_name in ["get_document_contents", "skim_documents", "read_documents"]:
+            if "document_ids" in state:
+                arguments["document_ids"] = state["document_ids"]
+
+        elif tool_name == "document_extraction":
+            if "outline" in state:
+                arguments["outline"] = state["outline"]
+            if "documents" in state:
+                arguments["documents"] = state["documents"]
+
+        elif tool_name == "document_compose":
+            if "outline" in state:
+                arguments["outline"] = state["outline"]
+            if "extracted_content" in state:
+                arguments["extracted_content"] = state["extracted_content"]
+
+        elif tool_name == "document_review":
+            if "composed_document" in state:
+                arguments["document"] = state["composed_document"]
+
+        return arguments
+
+    def _get_nested_value(self, data: Dict[str, Any], path: str) -> Any:
+        """从嵌套字典中获取值，支持点号路径"""
+        keys = path.split(".")
+        value = data
+        for key in keys:
+            if isinstance(value, dict) and key in value:
+                value = value[key]
+            else:
+                return None
+        return value
+
+    def _compress_state_for_llm(self, state: Dict[str, Any], max_chars: int = 4000) -> str:
+        """压缩状态信息供 LLM 使用"""
+        import json
+
+        compressed = {}
+        for key, value in state.items():
+            if key == "control":
+                continue
+            if key == "documents" and isinstance(value, list):
+                compressed["documents"] = f"[{len(value)} documents]"
+                if value:
+                    compressed["document_ids"] = [d.get("id") for d in value[:10]]
+            elif key == "document_ids" and isinstance(value, list):
+                compressed["document_ids"] = value[:20]
+            elif isinstance(value, dict) and len(str(value)) > 500:
+                compressed[key] = f"{{...{len(value)} keys}}"
+            elif isinstance(value, list) and len(value) > 10:
+                compressed[key] = f"[{len(value)} items]"
+            else:
+                compressed[key] = value
+
+        result = json.dumps(compressed, ensure_ascii=False, indent=2)
+        if len(result) > max_chars:
+            result = result[:max_chars] + "..."
+        return result
 
     def _update_state_from_result(
         self,
