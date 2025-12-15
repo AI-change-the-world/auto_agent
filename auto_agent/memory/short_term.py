@@ -204,39 +204,30 @@ class ShortTermMemory:
         step_history: List[Dict[str, Any]],
         target_tool_name: Optional[str],
         max_steps: int,
+        tool_dependencies_getter: Optional[Callable[[str], List[str]]] = None,
     ) -> List[Dict[str, Any]]:
         """
         智能过滤历史步骤
 
         基于工具依赖关系，优先保留与目标工具相关的步骤
+        
+        Args:
+            step_history: 步骤历史
+            target_tool_name: 目标工具名称
+            max_steps: 最大步骤数
+            tool_dependencies_getter: 获取工具依赖关系的回调函数
         """
         if not target_tool_name:
             return step_history[-max_steps:]
 
-        # 工具依赖关系表
-        tool_dependencies = {
-            "analyze_input": [],
-            "multi_query_search": ["generate_outline", "analyze_input"],
-            "get_document_contents": [
-                "multi_query_search",
-                "es_fulltext_search",
-                "search_documents_by_classification",
-            ],
-            "skim_documents": ["multi_query_search", "es_fulltext_search"],
-            "read_documents": ["multi_query_search", "es_fulltext_search"],
-            "analyze_documents": [
-                "get_document_contents",
-                "skim_documents",
-                "read_documents",
-            ],
-            "document_extraction": ["multi_query_search", "generate_outline"],
-            "document_compose": ["document_extraction", "generate_outline"],
-            "document_review": ["document_compose"],
-            "es_fulltext_search": ["analyze_input"],
-            "generate_outline": ["analyze_input"],
-        }
+        # 从工具定义获取依赖关系
+        related_tools: List[str] = []
+        if tool_dependencies_getter:
+            related_tools = tool_dependencies_getter(target_tool_name) or []
 
-        related_tools = tool_dependencies.get(target_tool_name, [])
+        if not related_tools:
+            # 没有依赖关系，直接返回最近的步骤
+            return step_history[-max_steps:]
 
         # 优先保留相关步骤
         relevant_steps = sorted(
@@ -253,108 +244,80 @@ class ShortTermMemory:
     def _default_compress_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
         默认结果压缩策略
-
-        来自 custom_agent_executor_v2.py 的压缩逻辑
+        
+        通用的压缩逻辑，当工具没有定义 compress_function 时使用
         """
+        if not isinstance(result, dict):
+            return result
+            
         compressed_result = {}
 
         for key, value in result.items():
-            # 文档内容特殊处理 - 只保留元数据
-            if key == "documents" and isinstance(value, list):
-                compressed_result["documents"] = [
-                    {
-                        "id": doc.get("id") or doc.get("document_id"),
-                        "title": doc.get("title", "")[:50],
-                        "content_length": len(doc.get("content", "")),
-                    }
-                    for doc in value[:5]
-                ]
-                if len(value) > 5:
-                    compressed_result["documents_count"] = len(value)
-
-            # 文档 ID 列表 - 只保留前 20 个
-            elif key == "document_ids" and isinstance(value, list):
-                compressed_result["document_ids"] = value[:20]
-                if len(value) > 20:
-                    compressed_result["document_ids_count"] = len(value)
-
-            # 大纲结构 - 压缩处理
-            elif key == "outline":
-                if isinstance(value, dict):
-                    compressed_outline = {
-                        "title": value.get("title", "")[:100],
-                        "sections_count": len(value.get("sections", [])),
-                    }
-                    sections = value.get("sections", [])[:3]
-                    compressed_outline["sections"] = [
-                        {"title": s.get("title", "")[:50]} for s in sections
-                    ]
-                    compressed_result["outline"] = compressed_outline
-                elif isinstance(value, list):
-                    compressed_result["outline"] = f"{len(value)} sections"
-                else:
-                    compressed_result["outline"] = value
-
-            # 文档内容 - 只保留引用
-            elif key == "document" and isinstance(value, dict):
-                compressed_result["document"] = {
-                    "title": value.get("title", "")[:50],
-                    "word_count": value.get("word_count", 0),
-                }
-
-            # 错误信息
-            elif key == "error":
+            # 错误信息 - 截断
+            if key == "error":
                 compressed_result["error"] = str(value)[:200]
-
-            # 其他小型数据
-            elif not isinstance(value, (list, dict)) or len(str(value)) < 300:
-                compressed_result[key] = value
-
-            # 大型数据只保留摘要
+            # 列表类型 - 限制数量并添加计数
+            elif isinstance(value, list):
+                if len(value) > 10:
+                    compressed_result[key] = value[:10]
+                    compressed_result[f"{key}_count"] = len(value)
+                else:
+                    compressed_result[key] = value
+            # 字典类型 - 检查大小
+            elif isinstance(value, dict):
+                value_str = str(value)
+                if len(value_str) > 500:
+                    # 大型字典只保留键名和摘要
+                    compressed_result[key] = {
+                        "_keys": list(value.keys())[:10],
+                        "_summary": f"<dict with {len(value)} keys, {len(value_str)} chars>"
+                    }
+                else:
+                    compressed_result[key] = value
+            # 字符串类型 - 截断
+            elif isinstance(value, str) and len(value) > 500:
+                compressed_result[key] = value[:500] + "..."
+            # 其他小型数据 - 保留
             else:
-                compressed_result[f"{key}_summary"] = (
-                    f"<{type(value).__name__}, {len(str(value))} chars>"
-                )
+                compressed_result[key] = value
 
         return compressed_result
 
     def _summarize_available_data(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成可用数据摘要
+        
+        通用的摘要逻辑，不依赖特定字段名
         """
         available_data = {}
+        
+        # 跳过的内部字段
+        skip_keys = {"inputs", "control", "last_failure", "_internal"}
 
         for key, value in state.items():
-            if key in ["inputs", "control", "last_failure"]:
+            if key in skip_keys or key.startswith("_"):
                 continue
 
-            if key == "documents" and isinstance(value, list):
-                available_data["documents"] = f"{len(value)} docs available"
-            elif key == "document_ids" and isinstance(value, list):
-                available_data["document_ids"] = (
-                    f"{len(value)} IDs: {value[:5]}..." if len(value) > 5 else value
-                )
-            elif key == "outline":
-                if isinstance(value, dict):
-                    sections_count = len(value.get("sections", []))
-                    available_data["outline"] = f"outline with {sections_count} sections"
-                elif isinstance(value, list):
-                    available_data["outline"] = f"outline with {len(value)} sections"
-            elif key == "quality" and isinstance(value, dict):
-                available_data["quality"] = value
-            elif key in ["composed_document", "reviewed_document"] and isinstance(
-                value, dict
-            ):
-                available_data[key] = {
-                    "title": value.get("title", "")[:50],
-                    "word_count": value.get("word_count", 0),
-                    "_ref": key,
-                }
-            elif key == "extracted_content" and isinstance(value, dict):
-                chapter_count = len([k for k in value.keys() if k not in ["summary"]])
-                available_data[key] = f"{chapter_count} chapters"
-            elif isinstance(value, (list, dict)):
-                available_data[key] = f"{type(value).__name__}({len(str(value))} chars)"
+            # 列表类型 - 显示数量
+            if isinstance(value, list):
+                if len(value) > 5:
+                    available_data[key] = f"{len(value)} items: {value[:3]}..."
+                else:
+                    available_data[key] = value
+            # 字典类型 - 显示键名和大小
+            elif isinstance(value, dict):
+                value_str = str(value)
+                if len(value_str) > 200:
+                    available_data[key] = {
+                        "_keys": list(value.keys())[:5],
+                        "_size": f"{len(value_str)} chars"
+                    }
+                else:
+                    available_data[key] = value
+            # 字符串类型 - 截断
+            elif isinstance(value, str) and len(value) > 100:
+                available_data[key] = value[:100] + "..."
+            # 其他类型 - 直接保留
             else:
                 available_data[key] = value
 

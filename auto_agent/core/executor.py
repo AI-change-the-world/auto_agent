@@ -43,12 +43,25 @@ class ExecutionEngine:
         tool_registry: ToolRegistry,
         retry_config: RetryConfig,
         llm_client: Optional[LLMClient] = None,
+        memory_storage_path: Optional[str] = None,
     ):
         self.tool_registry = tool_registry
         self.retry_controller = RetryController(retry_config, llm_client)
         self.llm_client = llm_client
+        self._memory_storage_path = memory_storage_path
         # 内置执行上下文（在 execute_plan_stream 中初始化）
         self.context: Optional[ExecutionContext] = None
+    
+    def _get_memory_system(self, user_id: str):
+        """获取用户的 MemorySystem（由框架内部管理）"""
+        from auto_agent.memory.manager import get_memory_manager
+        
+        if self._memory_storage_path:
+            manager = get_memory_manager(self._memory_storage_path)
+        else:
+            manager = get_memory_manager()
+        
+        return manager.get_memory_system(user_id)
 
     async def execute_plan(
         self,
@@ -137,22 +150,28 @@ class ExecutionEngine:
         Yields:
             Dict: 事件字典，包含 event 和 data 字段
         """
-        # 初始化 ExecutionContext
+        # 初始化 ExecutionContext（整合 Memory 系统）
         query = state.get("inputs", {}).get("query", "")
+        user_id = agent_info.get("user_id", "default") if agent_info else "default"
         plan_summary = "\n".join(
             f"{i+1}. {s.description}" for i, s in enumerate(plan.subtasks)
         )
         
+        # 获取用户的 MemorySystem（由框架内部管理）
+        memory_system = self._get_memory_system(user_id)
+        
         self.context = ExecutionContext(
             query=query,
+            user_id=user_id,
             plan_summary=plan_summary,
             state=state,
             agent_name=agent_info.get("name", "") if agent_info else "",
             agent_description=agent_info.get("description", "") if agent_info else "",
             agent_goals=agent_info.get("goals", []) if agent_info else [],
             agent_constraints=agent_info.get("constraints", []) if agent_info else [],
-            total_steps=len(plan.subtasks),
+            memory_system=memory_system,
         )
+        self.context.total_steps = len(plan.subtasks)
 
         results = []
         current_step_index = 0
@@ -280,6 +299,12 @@ class ExecutionEngine:
             current_step_index += 1
 
         state["control"]["iterations"] = iterations
+
+        # 结束任务，提炼记忆到长期存储
+        if self.context:
+            success_count = sum(1 for r in results if r.success)
+            promote = success_count > 0  # 只有成功执行才提炼记忆
+            self.context.end_task(promote_to_long_term=promote)
 
         # 返回最终结果
         yield {
@@ -529,11 +554,11 @@ class ExecutionEngine:
 
         # 4. 使用 LLM 智能构造参数（核心改进）
         if self.llm_client and tool:
-            arguments = await self._build_arguments_with_llm_v2(subtask, state, tool, arguments)
+            arguments = await self._build_arguments_with_llm(subtask, state, tool, arguments)
 
         return arguments
 
-    async def _build_arguments_with_llm_v2(
+    async def _build_arguments_with_llm(
         self,
         subtask: PlanStep,
         state: Dict[str, Any],
@@ -564,11 +589,20 @@ class ExecutionEngine:
 
         # 1. 首先应用 param_aliases（工具定义的参数别名映射）
         if tool_def.param_aliases:
-            for param_name, state_path in tool_def.param_aliases.items():
+            for param_name, aliases in tool_def.param_aliases.items():
                 if param_name not in result or result[param_name] is None:
-                    value = self._get_nested_value(state, state_path)
-                    if value is not None:
-                        result[param_name] = value
+                    # aliases 可能是字符串或列表
+                    alias_list = aliases if isinstance(aliases, list) else [aliases]
+                    for alias in alias_list:
+                        # 先尝试直接从 state 获取
+                        if alias in state and state[alias] is not None:
+                            result[param_name] = state[alias]
+                            break
+                        # 再尝试嵌套路径
+                        value = self._get_nested_value(state, alias)
+                        if value is not None:
+                            result[param_name] = value
+                            break
 
         # 2. 收集参数信息和缺失参数
         params_info = []
@@ -680,10 +714,22 @@ class ExecutionEngine:
                 
                 # 1. 尝试 param_aliases
                 if tool_def.param_aliases and param_name in tool_def.param_aliases:
-                    state_path = tool_def.param_aliases[param_name]
-                    value = self._get_nested_value(state, state_path)
-                    if value is not None:
-                        result[param_name] = value
+                    aliases = tool_def.param_aliases[param_name]
+                    alias_list = aliases if isinstance(aliases, list) else [aliases]
+                    found = False
+                    for alias in alias_list:
+                        # 先尝试直接从 state 获取
+                        if alias in state and state[alias] is not None:
+                            result[param_name] = state[alias]
+                            found = True
+                            break
+                        # 再尝试嵌套路径
+                        value = self._get_nested_value(state, alias)
+                        if value is not None:
+                            result[param_name] = value
+                            found = True
+                            break
+                    if found:
                         continue
                 
                 # 2. 尝试同名匹配

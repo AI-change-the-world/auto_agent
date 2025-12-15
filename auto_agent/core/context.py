@@ -1,22 +1,19 @@
 """
-ExecutionContext - Agent 执行上下文
+ExecutionContext - Agent 执行上下文（整合 Memory 系统）
 
-核心思想：
-- 维护整个执行过程的状态
-- 每次执行步骤前，将上下文发给 LLM 让其智能构造参数
-- 每次步骤执行后，让 LLM 决定如何更新状态
+核心设计：
+- 内置 WorkingMemory (L1) 管理当前执行的短期记忆
+- 可选关联 MemorySystem 访问 L2/L3 长期记忆
+- 执行结束时自动提炼有价值内容到长期记忆
 - 完全不硬编码任何参数映射规则
-
-使用方式：
-1. 创建 ExecutionContext，传入用户输入和 Agent 信息
-2. 执行每个步骤前，调用 build_step_context() 获取 LLM 上下文
-3. 执行步骤后，调用 record_step() 记录执行结果
-4. 状态自动维护在 context.state 中
 """
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from auto_agent.memory.system import MemorySystem
 
 
 @dataclass
@@ -32,47 +29,69 @@ class StepRecord:
     error: Optional[str] = None
 
 
-@dataclass
 class ExecutionContext:
     """
-    Agent 执行上下文
+    Agent 执行上下文（整合 Memory 系统）
     
-    包含：
-    - 用户输入
-    - 执行计划
-    - 当前状态（key-value 存储）
-    - 执行历史
-    - 自定义扩展数据（如数据库连接、ES 客户端等）
+    功能：
+    - 管理当前执行状态 (state dict)
+    - 内置 WorkingMemory (L1) 记录执行历史
+    - 可选关联 MemorySystem 访问长期记忆
+    - 为 LLM 生成上下文摘要
+    - 执行结束时提炼记忆
     """
     
-    # 用户输入
-    query: str
+    def __init__(
+        self,
+        query: str,
+        user_id: str = "default",
+        plan_summary: str = "",
+        state: Optional[Dict[str, Any]] = None,
+        agent_name: str = "",
+        agent_description: str = "",
+        agent_goals: Optional[List[str]] = None,
+        agent_constraints: Optional[List[str]] = None,
+        memory_system: Optional["MemorySystem"] = None,
+        extensions: Optional[Dict[str, Any]] = None,
+    ):
+        # 用户信息
+        self.user_id = user_id
+        self.query = query
+        
+        # Agent 元信息
+        self.agent_name = agent_name
+        self.agent_description = agent_description
+        self.agent_goals = agent_goals or []
+        self.agent_constraints = agent_constraints or []
+        
+        # 执行计划
+        self.plan_summary = plan_summary
+        self.total_steps = 0
+        self.current_step = 0
+        
+        # 状态字典
+        self.state = state or {}
+        
+        # 扩展数据（不发送给 LLM，用于存储数据库连接等）
+        self.extensions = extensions or {}
+        
+        # Memory 系统
+        self._memory_system = memory_system
+        self._task_id: Optional[str] = None
+        
+        # 执行历史（内置 L1 短期记忆）
+        self._history: List[StepRecord] = []
+        
+        # 初始化 WorkingMemory
+        if self._memory_system:
+            self._task_id = self._memory_system.start_task(user_id, query)
     
-    # 执行计划摘要（供 LLM 参考）
-    plan_summary: str = ""
+    # ==================== 执行历史管理 ====================
     
-    # 当前状态（LLM 可读写）
-    state: Dict[str, Any] = field(default_factory=dict)
-    
-    # 执行历史
-    history: List[StepRecord] = field(default_factory=list)
-    
-    # 自定义扩展数据（不发送给 LLM，用于存储数据库连接等）
-    extensions: Dict[str, Any] = field(default_factory=dict)
-    
-    # Agent 元信息
-    agent_name: str = ""
-    agent_description: str = ""
-    agent_goals: List[str] = field(default_factory=list)
-    agent_constraints: List[str] = field(default_factory=list)
-    
-    # 当前步骤索引
-    current_step: int = 0
-    total_steps: int = 0
-    
-    def add_step_record(self, record: StepRecord):
-        """添加步骤执行记录"""
-        self.history.append(record)
+    @property
+    def history(self) -> List[StepRecord]:
+        """获取执行历史"""
+        return self._history
     
     def record_step(
         self,
@@ -85,7 +104,7 @@ class ExecutionContext:
         success: bool,
         error: Optional[str] = None,
     ):
-        """记录步骤执行结果（便捷方法）"""
+        """记录步骤执行结果"""
         record = StepRecord(
             step_id=step_id,
             step_num=step_num,
@@ -96,15 +115,114 @@ class ExecutionContext:
             success=success,
             error=error,
         )
-        self.history.append(record)
+        self._history.append(record)
         self.current_step = step_num
+        
+        # 同步到 WorkingMemory
+        if self._memory_system and self._task_id:
+            wm = self._memory_system.get_working_memory(self._task_id)
+            wm.add_tool_call(
+                tool_name=tool_name,
+                arguments=arguments,
+                result=output,
+                step_id=step_id,
+            )
+    
+    def get_last_output(self, key: Optional[str] = None) -> Any:
+        """获取上一步的输出（或指定字段）"""
+        if not self._history:
+            return None
+        last = self._history[-1]
+        if key:
+            return last.output.get(key) if last.output else None
+        return last.output
+    
+    # ==================== Memory 系统集成 ====================
+    
+    def get_relevant_memories(self, limit: int = 5) -> str:
+        """获取与当前查询相关的长期记忆"""
+        if not self._memory_system:
+            return ""
+        
+        # 从 L2 搜索相关记忆
+        memories = self._memory_system.search_memory(
+            user_id=self.user_id,
+            query=self.query,
+            limit=limit,
+        )
+        
+        if not memories:
+            return ""
+        
+        lines = ["【相关记忆】"]
+        for m in memories:
+            lines.append(f"- [{m.category.value}] {m.content}")
+        
+        return "\n".join(lines)
+    
+    def get_user_preferences(self) -> str:
+        """获取用户偏好"""
+        if not self._memory_system:
+            return ""
+        
+        from auto_agent.memory.models import MemoryCategory
+        
+        prefs = self._memory_system.semantic.get_by_category(
+            self.user_id,
+            MemoryCategory.PREFERENCE,
+            limit=5,
+        )
+        
+        if not prefs:
+            return ""
+        
+        lines = ["【用户偏好】"]
+        for p in prefs:
+            lines.append(f"- {p.content}")
+        
+        return "\n".join(lines)
+    
+    def add_memory(
+        self,
+        content: str,
+        category: str = "custom",
+        tags: Optional[List[str]] = None,
+    ):
+        """添加长期记忆"""
+        if not self._memory_system:
+            return
+        
+        from auto_agent.memory.models import MemoryCategory, MemorySource
+        
+        self._memory_system.add_memory(
+            user_id=self.user_id,
+            content=content,
+            category=MemoryCategory(category),
+            tags=tags,
+            source=MemorySource.TASK_RESULT,
+        )
+    
+    def end_task(self, promote_to_long_term: bool = True):
+        """
+        结束任务
+        
+        可选：将短期记忆中的有价值内容提炼到长期记忆
+        """
+        if self._memory_system and self._task_id:
+            self._memory_system.end_task(
+                user_id=self.user_id,
+                task_id=self._task_id,
+                promote_to_long_term=promote_to_long_term,
+            )
+    
+    # ==================== 上下文生成 ====================
     
     def get_state_summary(self, max_chars: int = 4000) -> str:
         """获取状态摘要（供 LLM 使用）"""
         summary = {}
         for key, value in self.state.items():
             if key == "control":
-                continue  # 跳过控制字段
+                continue
             if isinstance(value, list):
                 if len(value) > 5:
                     summary[key] = f"[{len(value)} items, first 3: {value[:3]}]"
@@ -127,7 +245,7 @@ class ExecutionContext:
     
     def get_history_summary(self, max_steps: int = 10) -> str:
         """获取执行历史摘要（供 LLM 使用）"""
-        recent = self.history[-max_steps:] if len(self.history) > max_steps else self.history
+        recent = self._history[-max_steps:] if len(self._history) > max_steps else self._history
         
         lines = []
         for record in recent:
@@ -140,17 +258,8 @@ class ExecutionContext:
         
         return "\n".join(lines)
     
-    def get_last_output(self, key: Optional[str] = None) -> Any:
-        """获取上一步的输出（或指定字段）"""
-        if not self.history:
-            return None
-        last = self.history[-1]
-        if key:
-            return last.output.get(key) if last.output else None
-        return last.output
-    
-    def to_llm_context(self) -> str:
-        """生成发送给 LLM 的上下文描述"""
+    def to_llm_context(self, include_memories: bool = True) -> str:
+        """生成发送给 LLM 的完整上下文"""
         parts = []
         
         # Agent 信息
@@ -166,6 +275,16 @@ class ExecutionContext:
         # 用户输入
         parts.append(f"【用户输入】\n{self.query}")
         
+        # 长期记忆（如果启用）
+        if include_memories:
+            memories = self.get_relevant_memories()
+            if memories:
+                parts.append(memories)
+            
+            prefs = self.get_user_preferences()
+            if prefs:
+                parts.append(prefs)
+        
         # 执行计划
         if self.plan_summary:
             parts.append(f"【执行计划】\n{self.plan_summary}")
@@ -180,7 +299,7 @@ class ExecutionContext:
             parts.append(f"【当前状态】\n{state_summary}")
         
         # 执行历史
-        if self.history:
+        if self._history:
             parts.append(f"【执行历史】\n{self.get_history_summary()}")
         
         return "\n\n".join(parts)
@@ -193,11 +312,7 @@ class ExecutionContext:
         tool_params: List[Dict[str, Any]],
         step_description: str,
     ) -> str:
-        """
-        构建单个步骤的 LLM 上下文
-        
-        用于让 LLM 智能构造参数
-        """
+        """构建单个步骤的 LLM 上下文（用于智能参数构造）"""
         parts = [self.to_llm_context()]
         
         parts.append(f"""【当前步骤】
