@@ -29,6 +29,7 @@ from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter, QueryIntent
 from auto_agent.memory.system import MemorySystem
+from auto_agent.memory.manager import create_memory_system
 
 # 兼容旧接口
 from auto_agent.memory.categorized import (
@@ -44,6 +45,7 @@ __all__ = [
     "MemorySystem",
     "MemoryRouter",
     "QueryIntent",
+    "create_memory_system",
     # 新架构 - L1 短时记忆
     "WorkingMemory",
     "WorkingMemoryItem",

@@ -51,17 +51,39 @@ class ExecutionEngine:
         self._memory_storage_path = memory_storage_path
         # 内置执行上下文（在 execute_plan_stream 中初始化）
         self.context: Optional[ExecutionContext] = None
+        # 缓存已创建的 MemorySystem（按 user_id）
+        self._memory_systems: Dict[str, Any] = {}
     
     def _get_memory_system(self, user_id: str):
-        """获取用户的 MemorySystem（由框架内部管理）"""
-        from auto_agent.memory.manager import get_memory_manager
+        """
+        获取用户的 MemorySystem
         
+        直接创建，不使用 MemoryManager
+        LLM client 直接从 ExecutionEngine 传入
+        """
+        if user_id in self._memory_systems:
+            return self._memory_systems[user_id]
+        
+        from auto_agent.memory.system import MemorySystem
+        from pathlib import Path
+        
+        # 确定存储路径
         if self._memory_storage_path:
-            manager = get_memory_manager(self._memory_storage_path)
+            storage_path = Path(self._memory_storage_path) / user_id
         else:
-            manager = get_memory_manager()
+            storage_path = Path("./auto_agent_memory") / user_id
         
-        return manager.get_memory_system(user_id)
+        storage_path.mkdir(parents=True, exist_ok=True)
+        
+        # 直接创建 MemorySystem，传入 llm_client
+        memory_system = MemorySystem(
+            storage_path=str(storage_path),
+            auto_save=True,
+            llm_client=self.llm_client,  # 直接使用 ExecutionEngine 的 llm_client
+        )
+        
+        self._memory_systems[user_id] = memory_system
+        return memory_system
 
     async def execute_plan(
         self,
