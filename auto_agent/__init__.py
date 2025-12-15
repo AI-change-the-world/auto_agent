@@ -30,12 +30,7 @@ from auto_agent.memory.working import WorkingMemory
 from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter, QueryIntent
-from auto_agent.memory.manager import (
-    MemoryManager,
-    get_memory_manager,
-    configure_memory,
-    get_user_memory,
-)
+from auto_agent.memory.manager import create_memory_system
 from auto_agent.memory.models import (
     MemoryLayer,
     MemorySource,
@@ -106,10 +101,7 @@ __all__ = [
     "NarrativeMemoryManager",
     "MemoryRouter",
     "QueryIntent",
-    "MemoryManager",
-    "get_memory_manager",
-    "configure_memory",
-    "get_user_memory",
+    "create_memory_system",
     "MemoryLayer",
     "MemorySource",
     "SemanticMemoryItem",
