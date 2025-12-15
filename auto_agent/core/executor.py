@@ -300,11 +300,10 @@ class ExecutionEngine:
 
         state["control"]["iterations"] = iterations
 
-        # 结束任务，提炼记忆到长期存储
+        # 结束任务，清理短期记忆
+        # 注意：默认不自动提炼执行历史到 L2，执行记录由应用层（DocHive）管理
         if self.context:
-            success_count = sum(1 for r in results if r.success)
-            promote = success_count > 0  # 只有成功执行才提炼记忆
-            self.context.end_task(promote_to_long_term=promote)
+            self.context.end_task(promote_to_long_term=False)
 
         # 返回最终结果
         yield {
@@ -554,11 +553,11 @@ class ExecutionEngine:
 
         # 4. 使用 LLM 智能构造参数（核心改进）
         if self.llm_client and tool:
-            arguments = await self._build_arguments_with_llm(subtask, state, tool, arguments)
+            arguments = await self._build_arguments_with_llm_v2(subtask, state, tool, arguments)
 
         return arguments
 
-    async def _build_arguments_with_llm(
+    async def _build_arguments_with_llm_v2(
         self,
         subtask: PlanStep,
         state: Dict[str, Any],

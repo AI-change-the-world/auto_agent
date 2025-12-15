@@ -1,20 +1,27 @@
 """
 记忆路由器 (Memory Router)
 
-Query → 记忆命中流程：
-1. 轻量分析 Query（意图类型、领域分类）
-2. 确定所需记忆层级与分类
-3. 仅在相关 L2 记忆子集中检索
-4. 按权重、时间衰减排序
-5. Top-K 命中记忆转为文本注入上下文
+基于 docs/MEMORY.md 设计的智能记忆检索流程：
+
+1. Query 进入系统
+2. LLM 轻量分析 Query（意图类型、领域分类、关键词）
+3. 确定所需记忆层级与分类
+4. 仅在相关 L2 记忆子集中检索
+5. 按权重、时间衰减排序
+6. LLM 总结上下文（可选）
+7. Top-K 命中记忆转为文本注入上下文
 """
 
+import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from auto_agent.memory.models import MemoryCategory
+from auto_agent.memory.models import MemoryCategory, SemanticMemoryItem
 from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
+
+if TYPE_CHECKING:
+    from auto_agent.llm.client import LLMClient
 
 
 class QueryIntent:
@@ -24,94 +31,196 @@ class QueryIntent:
     DECISION = "decision"  # 决策
     REFLECTION = "reflection"  # 反思
     ACTION = "action"  # 执行动作
+    CHAT = "chat"  # 闲聊
     UNKNOWN = "unknown"
 
 
 class MemoryRouter:
     """
-    记忆路由器
+    智能记忆路由器
 
     核心功能：
-    1. 分析 Query 的意图和领域
-    2. 决定需要检索哪些记忆
+    1. LLM 分析 Query 的意图和领域
+    2. 智能决定需要检索哪些记忆
     3. 控制记忆注入的 Token 预算
+    4. LLM 总结上下文（避免信息过载）
     """
-
-    # 领域关键词映射
-    CATEGORY_KEYWORDS = {
-        MemoryCategory.WORK: [
-            "工作", "项目", "代码", "开发", "技术", "API", "系统", "部署",
-            "work", "project", "code", "develop", "tech", "api", "system",
-        ],
-        MemoryCategory.LIFE: [
-            "生活", "日常", "习惯", "健康", "运动", "饮食",
-            "life", "daily", "habit", "health", "exercise",
-        ],
-        MemoryCategory.PREFERENCE: [
-            "喜欢", "偏好", "习惯", "风格", "方式",
-            "prefer", "like", "style", "way",
-        ],
-        MemoryCategory.EMOTION: [
-            "感觉", "情绪", "态度", "心情",
-            "feel", "emotion", "mood", "attitude",
-        ],
-        MemoryCategory.STRATEGY: [
-            "方法", "策略", "经验", "技巧", "怎么", "如何",
-            "method", "strategy", "experience", "how", "tip",
-        ],
-        MemoryCategory.KNOWLEDGE: [
-            "什么是", "定义", "概念", "知识", "了解",
-            "what is", "define", "concept", "knowledge",
-        ],
-    }
-
-    # 意图关键词映射
-    INTENT_KEYWORDS = {
-        QueryIntent.INQUIRY: ["什么", "为什么", "怎么", "如何", "是否", "?", "？"],
-        QueryIntent.DECISION: ["选择", "决定", "应该", "建议", "推荐"],
-        QueryIntent.REFLECTION: ["总结", "反思", "回顾", "学到", "经验"],
-        QueryIntent.ACTION: ["帮我", "执行", "创建", "生成", "写", "做"],
-    }
 
     def __init__(
         self,
         semantic_memory: SemanticMemory,
         narrative_memory: Optional[NarrativeMemoryManager] = None,
+        llm_client: Optional["LLMClient"] = None,
         default_token_budget: int = 2000,
     ):
         self.semantic_memory = semantic_memory
         self.narrative_memory = narrative_memory
+        self.llm_client = llm_client
         self.default_token_budget = default_token_budget
 
-    def analyze_query(self, query: str) -> Dict[str, Any]:
+    async def load_context(
+        self,
+        user_id: str,
+        query: str,
+        token_budget: Optional[int] = None,
+        summarize: bool = True,
+    ) -> Dict[str, Any]:
         """
-        分析查询
+        智能加载记忆上下文（主入口）
 
-        返回：
-        - intent: 意图类型
-        - categories: 相关领域分类
-        - keywords: 提取的关键词
+        流程：
+        1. LLM 分析 Query（意图、领域、关键词）
+        2. 从 JSON 索引中筛选候选记忆
+        3. 加载相关 Markdown 详细内容
+        4. LLM 总结上下文（可选）
+        5. 返回可注入 Prompt 的上下文
+
+        Args:
+            user_id: 用户 ID
+            query: 用户查询
+            token_budget: Token 预算
+            summarize: 是否使用 LLM 总结上下文
+
+        Returns:
+            {
+                "context": str,  # 可直接注入 Prompt 的上下文
+                "memories": List[SemanticMemoryItem],  # 命中的记忆
+                "analysis": Dict,  # 查询分析结果
+                "token_estimate": int,  # 估计的 token 数
+            }
         """
+        token_budget = token_budget or self.default_token_budget
+
+        # 1. 分析 Query
+        if self.llm_client:
+            analysis = await self._analyze_query_with_llm(query)
+        else:
+            analysis = self._analyze_query_simple(query)
+
+        # 2. 判断是否需要记忆
+        should_use, reason = self.should_use_memory(query, analysis)
+        if not should_use:
+            return {
+                "context": "",
+                "memories": [],
+                "analysis": {"skip_reason": reason, **analysis},
+                "token_estimate": 0,
+            }
+
+        # 3. 从 JSON 索引中筛选候选记忆
+        candidates = self._search_candidates(user_id, analysis)
+
+        if not candidates:
+            return {
+                "context": "",
+                "memories": [],
+                "analysis": analysis,
+                "token_estimate": 0,
+            }
+
+        # 4. 加载 Markdown 详细内容（如果有）
+        memories_with_content = self._load_memory_contents(user_id, candidates)
+
+        # 5. 生成上下文
+        if summarize and self.llm_client and len(memories_with_content) > 3:
+            # LLM 总结上下文
+            context = await self._summarize_context_with_llm(
+                query, memories_with_content, token_budget
+            )
+        else:
+            # 直接拼接
+            context = self._build_context_simple(memories_with_content, token_budget)
+
+        return {
+            "context": context,
+            "memories": candidates,
+            "analysis": analysis,
+            "token_estimate": len(context) // 4,
+        }
+
+    async def _analyze_query_with_llm(self, query: str) -> Dict[str, Any]:
+        """使用 LLM 分析查询"""
+        prompt = f"""分析以下用户查询，提取关键信息。
+
+【用户查询】
+{query}
+
+请返回 JSON 格式：
+```json
+{{
+    "intent": "inquiry|decision|reflection|action|chat",
+    "categories": ["work", "life", "preference", "strategy", "knowledge"],
+    "keywords": ["关键词1", "关键词2"],
+    "domain": "编程|设计|写作|其他",
+    "needs_history": true/false
+}}
+```
+
+说明：
+- intent: 用户意图（inquiry=询问, decision=决策, reflection=反思, action=执行, chat=闲聊）
+- categories: 相关领域（可多选）
+- keywords: 用于检索的关键词
+- domain: 具体领域
+- needs_history: 是否需要历史记忆
+
+只返回 JSON，不要其他内容。"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+            )
+
+            # 提取 JSON
+            json_match = re.search(r"\{[^{}]*\}", response, re.DOTALL)
+            if json_match:
+                result = json.loads(json_match.group())
+                # 转换 categories 为 MemoryCategory
+                result["categories"] = [
+                    MemoryCategory(c) for c in result.get("categories", [])
+                    if c in [mc.value for mc in MemoryCategory]
+                ]
+                return result
+        except Exception:
+            pass
+
+        # 失败时使用简单分析
+        return self._analyze_query_simple(query)
+
+    def _analyze_query_simple(self, query: str) -> Dict[str, Any]:
+        """简单的查询分析（无 LLM）"""
         query_lower = query.lower()
 
-        # 识别意图
+        # 意图识别
         intent = QueryIntent.UNKNOWN
-        for intent_type, keywords in self.INTENT_KEYWORDS.items():
+        intent_keywords = {
+            QueryIntent.INQUIRY: ["什么", "为什么", "怎么", "如何", "是否", "?", "？"],
+            QueryIntent.DECISION: ["选择", "决定", "应该", "建议", "推荐"],
+            QueryIntent.REFLECTION: ["总结", "反思", "回顾", "学到", "经验"],
+            QueryIntent.ACTION: ["帮我", "执行", "创建", "生成", "写", "做"],
+            QueryIntent.CHAT: ["你好", "hi", "hello", "嗨"],
+        }
+        for intent_type, keywords in intent_keywords.items():
             if any(kw in query_lower for kw in keywords):
                 intent = intent_type
                 break
 
-        # 识别领域
+        # 领域识别
+        category_keywords = {
+            MemoryCategory.WORK: ["工作", "项目", "代码", "开发", "技术", "编程"],
+            MemoryCategory.STRATEGY: ["方法", "策略", "经验", "技巧", "怎么", "如何"],
+            MemoryCategory.KNOWLEDGE: ["什么是", "定义", "概念", "知识"],
+            MemoryCategory.PREFERENCE: ["喜欢", "偏好", "习惯", "风格"],
+        }
         categories = []
-        for category, keywords in self.CATEGORY_KEYWORDS.items():
+        for category, keywords in category_keywords.items():
             if any(kw in query_lower for kw in keywords):
                 categories.append(category)
 
-        # 如果没有识别到领域，默认使用 WORK 和 KNOWLEDGE
         if not categories:
             categories = [MemoryCategory.WORK, MemoryCategory.KNOWLEDGE]
 
-        # 提取关键词（简单分词）
+        # 提取关键词
         keywords = re.findall(r"[\w\u4e00-\u9fff]+", query)
         keywords = [w for w in keywords if len(w) > 1]
 
@@ -119,7 +228,179 @@ class MemoryRouter:
             "intent": intent,
             "categories": categories,
             "keywords": keywords,
+            "domain": "unknown",
+            "needs_history": intent != QueryIntent.CHAT,
         }
+
+    def _search_candidates(
+        self,
+        user_id: str,
+        analysis: Dict[str, Any],
+        limit: int = 20,
+    ) -> List[SemanticMemoryItem]:
+        """从 JSON 索引中筛选候选记忆"""
+        candidates = []
+        seen_ids = set()
+
+        # 1. 按分类检索
+        for category in analysis.get("categories", []):
+            cat_memories = self.semantic_memory.get_by_category(
+                user_id, category, limit=5
+            )
+            for mem in cat_memories:
+                if mem.memory_id not in seen_ids:
+                    candidates.append(mem)
+                    seen_ids.add(mem.memory_id)
+
+        # 2. 按关键词检索
+        keywords = analysis.get("keywords", [])
+        if keywords:
+            query_str = " ".join(keywords)
+            search_results = self.semantic_memory.search(user_id, query_str, limit=10)
+            for mem in search_results:
+                if mem.memory_id not in seen_ids:
+                    candidates.append(mem)
+                    seen_ids.add(mem.memory_id)
+
+        # 3. 添加高 reward 的偏好记忆
+        preferences = self.semantic_memory.get_by_category(
+            user_id, MemoryCategory.PREFERENCE, limit=5
+        )
+        for pref in preferences:
+            if pref.reward > 0.3 and pref.memory_id not in seen_ids:
+                candidates.append(pref)
+                seen_ids.add(pref.memory_id)
+
+        # 4. 按得分排序
+        candidates.sort(
+            key=lambda x: x.calculate_score(self.semantic_memory._time_decay_factor),
+            reverse=True,
+        )
+
+        return candidates[:limit]
+
+    def _load_memory_contents(
+        self,
+        user_id: str,
+        memories: List[SemanticMemoryItem],
+    ) -> List[Dict[str, Any]]:
+        """加载记忆的详细内容（从 Markdown）"""
+        results = []
+        for mem in memories:
+            item = {
+                "memory_id": mem.memory_id,
+                "category": mem.category.value,
+                "summary": mem.content,  # JSON 中的简短摘要
+                "detail": None,  # Markdown 中的详细内容
+                "confidence": mem.confidence,
+                "reward": mem.reward,
+            }
+
+            # 如果有关联的 Markdown，加载详细内容
+            if mem.summary_md_ref:
+                detail = self.semantic_memory.get_markdown_content(
+                    user_id, mem.memory_id
+                )
+                if detail:
+                    item["detail"] = detail
+
+            results.append(item)
+
+        return results
+
+    async def _summarize_context_with_llm(
+        self,
+        query: str,
+        memories: List[Dict[str, Any]],
+        token_budget: int,
+    ) -> str:
+        """使用 LLM 总结记忆上下文"""
+        # 构建记忆列表
+        memory_texts = []
+        for mem in memories:
+            text = f"[{mem['category']}] {mem['summary']}"
+            if mem.get("detail"):
+                text += f"\n详细: {mem['detail'][:500]}"
+            memory_texts.append(text)
+
+        memories_str = "\n\n".join(memory_texts)
+
+        prompt = f"""根据用户查询，从以下记忆中提取相关信息，生成简洁的上下文摘要。
+
+【用户查询】
+{query}
+
+【可用记忆】
+{memories_str}
+
+【要求】
+1. 只提取与查询相关的信息
+2. 保持简洁，控制在 {token_budget // 2} 字以内
+3. 如果记忆中没有相关信息，返回空字符串
+4. 使用自然语言，不要列表格式
+
+请直接返回摘要内容，不要包含任何解释。"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+            )
+            summary = response.strip()
+            if summary and summary != "空" and len(summary) > 10:
+                return f"【相关记忆】\n{summary}"
+        except Exception:
+            pass
+
+        # 失败时使用简单拼接
+        return self._build_context_simple(memories, token_budget)
+
+    def _build_context_simple(
+        self,
+        memories: List[Dict[str, Any]],
+        token_budget: int,
+    ) -> str:
+        """简单拼接记忆上下文"""
+        if not memories:
+            return ""
+
+        max_chars = token_budget * 4
+        lines = ["【相关记忆】"]
+        char_count = 0
+
+        for mem in memories:
+            line = f"- [{mem['category']}] {mem['summary']}"
+            if char_count + len(line) > max_chars:
+                break
+            lines.append(line)
+            char_count += len(line)
+
+        return "\n".join(lines) if len(lines) > 1 else ""
+
+    def should_use_memory(
+        self,
+        query: str,
+        analysis: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[bool, str]:
+        """判断是否需要使用记忆"""
+        if analysis is None:
+            analysis = self._analyze_query_simple(query)
+
+        # 闲聊不需要记忆
+        if analysis.get("intent") == QueryIntent.CHAT:
+            return False, "闲聊类查询，无需记忆"
+
+        # 明确不需要历史
+        if analysis.get("needs_history") is False:
+            return False, "查询不需要历史记忆"
+
+        return True, "需要记忆"
+
+    # ==================== 兼容旧接口 ====================
+
+    def analyze_query(self, query: str) -> Dict[str, Any]:
+        """分析查询（同步版本，兼容旧接口）"""
+        return self._analyze_query_simple(query)
 
     def route(
         self,
@@ -129,158 +410,59 @@ class MemoryRouter:
         include_narrative: bool = True,
     ) -> Dict[str, Any]:
         """
-        路由查询到相关记忆
+        路由查询到相关记忆（同步版本，兼容旧接口）
 
-        返回：
-        - context: 注入上下文的文本
-        - memories: 命中的记忆列表
-        - analysis: 查询分析结果
-        - token_estimate: 估计的 token 数
+        注意：此方法不使用 LLM，仅做简单匹配
+        推荐使用 load_context() 异步方法
         """
         token_budget = token_budget or self.default_token_budget
-        max_chars = token_budget * 4  # 粗略估计
+        analysis = self._analyze_query_simple(query)
 
-        # 1. 分析查询
-        analysis = self.analyze_query(query)
+        should_use, reason = self.should_use_memory(query, analysis)
+        if not should_use:
+            return {
+                "context": "",
+                "memories": [],
+                "analysis": {"skip_reason": reason, **analysis},
+                "token_estimate": 0,
+            }
 
-        # 2. 检索 L2 语义记忆
-        memories = []
-        char_count = 0
-
-        # 2.1 按相关分类检索
-        for category in analysis["categories"]:
-            cat_memories = self.semantic_memory.get_by_category(
-                user_id, category, limit=5
-            )
-            for mem in cat_memories:
-                if mem not in memories:
-                    memories.append(mem)
-
-        # 2.2 全文检索补充
-        search_results = self.semantic_memory.search(user_id, query, limit=10)
-        for mem in search_results:
-            if mem not in memories:
-                memories.append(mem)
-
-        # 2.3 添加高 reward 的偏好记忆
-        preferences = self.semantic_memory.get_by_category(
-            user_id, MemoryCategory.PREFERENCE, limit=5
-        )
-        for pref in preferences:
-            if pref.reward > 0.3 and pref not in memories:
-                memories.append(pref)
-
-        # 3. 按得分排序
-        memories.sort(
-            key=lambda x: x.calculate_score(self.semantic_memory._time_decay_factor),
-            reverse=True,
-        )
-
-        # 4. 生成上下文
-        context_lines = []
-
-        # 4.1 L2 语义记忆
-        if memories:
-            context_lines.append("【相关记忆】")
-            for mem in memories:
-                line = f"- [{mem.category.value}] {mem.content}"
-                if char_count + len(line) > max_chars * 0.7:  # 留 30% 给叙事记忆
-                    break
-                context_lines.append(line)
-                char_count += len(line)
-
-        # 4.2 L3 叙事记忆
-        if include_narrative and self.narrative_memory:
-            remaining_chars = max_chars - char_count
-            if remaining_chars > 200:
-                narrative_context = self.narrative_memory.get_context_for_prompt(
-                    user_id,
-                    categories=analysis["categories"],
-                    max_chars=remaining_chars,
-                )
-                if narrative_context:
-                    context_lines.append("")
-                    context_lines.append(narrative_context)
-                    char_count += len(narrative_context)
-
-        context = "\n".join(context_lines) if context_lines else ""
+        candidates = self._search_candidates(user_id, analysis)
+        memories_with_content = self._load_memory_contents(user_id, candidates)
+        context = self._build_context_simple(memories_with_content, token_budget)
 
         return {
             "context": context,
-            "memories": memories,
+            "memories": candidates,
             "analysis": analysis,
-            "token_estimate": char_count // 4,
+            "token_estimate": len(context) // 4,
         }
-
-    def should_use_memory(
-        self,
-        query: str,
-        analysis: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, str]:
-        """
-        判断是否需要使用记忆
-
-        某些简单查询可能不需要记忆注入
-        """
-        if analysis is None:
-            analysis = self.analyze_query(query)
-
-        # 简单问候不需要记忆
-        greetings = ["你好", "hi", "hello", "嗨", "早上好", "晚上好"]
-        if any(g in query.lower() for g in greetings) and len(query) < 10:
-            return False, "简单问候，无需记忆"
-
-        # 反思类查询需要记忆
-        if analysis["intent"] == QueryIntent.REFLECTION:
-            return True, "反思类查询，需要历史记忆"
-
-        # 决策类查询需要偏好记忆
-        if analysis["intent"] == QueryIntent.DECISION:
-            return True, "决策类查询，需要偏好记忆"
-
-        # 有明确领域的查询需要记忆
-        if analysis["categories"]:
-            return True, f"领域相关查询: {[c.value for c in analysis['categories']]}"
-
-        return True, "默认使用记忆"
 
     def get_memory_injection_config(
         self,
         query: str,
         analysis: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """
-        获取记忆注入配置
-
-        根据查询类型决定：
-        - 注入哪些层级的记忆
-        - Token 预算分配
-        - 优先级策略
-        """
+        """获取记忆注入配置"""
         if analysis is None:
-            analysis = self.analyze_query(query)
+            analysis = self._analyze_query_simple(query)
 
         config = {
             "use_l2_semantic": True,
             "use_l3_narrative": False,
             "token_budget": self.default_token_budget,
-            "priority": "relevance",  # relevance / recency / reward
+            "priority": "relevance",
         }
 
-        intent = analysis["intent"]
+        intent = analysis.get("intent", QueryIntent.UNKNOWN)
 
         if intent == QueryIntent.REFLECTION:
-            # 反思类：使用叙事记忆，增加预算
             config["use_l3_narrative"] = True
             config["token_budget"] = int(self.default_token_budget * 1.5)
             config["priority"] = "recency"
-
         elif intent == QueryIntent.DECISION:
-            # 决策类：优先高 reward 记忆
             config["priority"] = "reward"
-
         elif intent == QueryIntent.ACTION:
-            # 执行类：减少记忆注入，避免干扰
             config["token_budget"] = int(self.default_token_budget * 0.5)
 
         return config

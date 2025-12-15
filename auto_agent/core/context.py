@@ -202,11 +202,17 @@ class ExecutionContext:
             source=MemorySource.TASK_RESULT,
         )
     
-    def end_task(self, promote_to_long_term: bool = True):
+    def end_task(self, promote_to_long_term: bool = False):
         """
         结束任务
         
-        可选：将短期记忆中的有价值内容提炼到长期记忆
+        Args:
+            promote_to_long_term: 是否提炼到长期记忆（默认 False）
+        
+        注意：
+        - 默认不自动提炼执行历史到 L2 长期记忆
+        - 执行历史应该保留在应用层（如 DocHive）的执行记录中
+        - L2 记忆应该是可复用的策略/知识，而不是执行日志
         """
         if self._memory_system and self._task_id:
             self._memory_system.end_task(

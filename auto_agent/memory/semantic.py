@@ -1,10 +1,18 @@
 """
 L2 长期语义记忆 (Semantic Memory)
 
-系统长期可复用、可学习的核心记忆层
-- JSON 结构化存储
-- 支持分类、标签、打分、时间衰减
-- 用户反馈驱动更新
+基于 docs/MEMORY.md 设计：
+- JSON 作为索引层（决策与检索）
+- Markdown 作为语义表达层（具体内容）
+- 一个用户一个 memory.json + 多个 reflections/*.md
+
+存储结构：
+    {storage_path}/
+    └── {user_id}/
+        ├── memory.json          # 唯一的索引文件
+        └── reflections/         # Markdown 内容目录
+            ├── {memory_id}.md
+            └── ...
 """
 
 import json
@@ -25,12 +33,13 @@ class SemanticMemory:
     """
     L2 长期语义记忆
 
-    存储形式：JSON（强结构化）
-    支持：
-    - 分类与标签
-    - 打分与权重
-    - 时间衰减
-    - 用户反馈更新
+    设计原则（来自 MEMORY.md）：
+    - JSON 负责：是否命中、是否注入上下文、注入优先级判断、学习与权重更新
+    - Markdown 负责：高语义密度内容、强可读性、供模型理解与人工查看
+
+    存储结构：
+    - {user_id}/memory.json: 索引文件，存储所有记忆的元数据
+    - {user_id}/reflections/{memory_id}.md: 具体内容文件
     """
 
     def __init__(
@@ -61,26 +70,50 @@ class SemanticMemory:
         source: MemorySource = MemorySource.AGENT_INFERENCE,
         metadata: Optional[Dict[str, Any]] = None,
         ttl: Optional[int] = None,
+        detail_content: Optional[str] = None,  # 详细内容（存入 Markdown）
     ) -> SemanticMemoryItem:
-        """添加记忆"""
-        if user_id not in self._memories:
-            self._memories[user_id] = {}
+        """
+        添加记忆
+
+        Args:
+            user_id: 用户 ID
+            content: 简短摘要（存入 JSON 索引）
+            category: 分类
+            subcategory: 子分类
+            tags: 标签列表
+            confidence: 置信度
+            source: 来源
+            metadata: 元数据
+            ttl: 过期时间（秒）
+            detail_content: 详细内容（可选，存入 Markdown 文件）
+
+        Returns:
+            SemanticMemoryItem
+        """
+        self._ensure_loaded(user_id)
 
         memory_id = SemanticMemoryItem.generate_id()
         current_time = int(time.time())
+
+        # 如果有详细内容，创建 Markdown 文件
+        md_ref = None
+        if detail_content and self._storage_path:
+            md_ref = f"reflections/{memory_id}.md"
+            self._save_markdown(user_id, memory_id, detail_content, category, tags)
 
         item = SemanticMemoryItem(
             memory_id=memory_id,
             category=category,
             subcategory=subcategory,
             tags=tags or [],
-            content=content,
+            content=content,  # JSON 中只存简短摘要
             confidence=confidence,
             source=source,
             created_at=current_time,
             updated_at=current_time,
             expires_at=current_time + ttl if ttl else None,
             metadata=metadata or {},
+            summary_md_ref=md_ref,  # 关联 Markdown 文件
         )
 
         self._memories[user_id][memory_id] = item
@@ -138,8 +171,11 @@ class SemanticMemory:
         return item
 
     def delete(self, user_id: str, memory_id: str) -> bool:
-        """删除记忆"""
+        """删除记忆（同时删除关联的 Markdown 文件）"""
         if user_id in self._memories and memory_id in self._memories[user_id]:
+            # 删除关联的 Markdown 文件
+            self.delete_markdown(user_id, memory_id)
+            # 删除索引
             del self._memories[user_id][memory_id]
             if self._auto_save and self._storage_path:
                 self._save_user(user_id)
@@ -431,21 +467,35 @@ class SemanticMemory:
 
     # ==================== 持久化 ====================
 
+    def _get_user_dir(self, user_id: str) -> Path:
+        """获取用户目录"""
+        return self._storage_path / user_id
+
+    def _get_user_file(self, user_id: str) -> Path:
+        """获取用户索引文件（唯一的 JSON 文件）"""
+        return self._get_user_dir(user_id) / "memory.json"
+
+    def _get_reflections_dir(self, user_id: str) -> Path:
+        """获取用户 Markdown 目录"""
+        return self._get_user_dir(user_id) / "reflections"
+
     def _ensure_loaded(self, user_id: str):
         """确保用户数据已加载"""
         if user_id not in self._memories:
             self._load_user(user_id)
 
-    def _get_user_file(self, user_id: str) -> Path:
-        return self._storage_path / f"{user_id}_semantic.json"
-
     def _save_user(self, user_id: str):
-        """保存用户记忆"""
+        """保存用户记忆索引（JSON）"""
         if not self._storage_path:
             return
 
+        user_dir = self._get_user_dir(user_id)
+        user_dir.mkdir(parents=True, exist_ok=True)
+
         file_path = self._get_user_file(user_id)
         data = {
+            "user_id": user_id,
+            "version": "2.0",  # 新版本标识
             "memories": {
                 mid: item.to_dict() for mid, item in self._memories.get(user_id, {}).items()
             },
@@ -463,6 +513,11 @@ class SemanticMemory:
 
         file_path = self._get_user_file(user_id)
         if not file_path.exists():
+            # 尝试兼容旧格式
+            old_file = self._storage_path / f"{user_id}_semantic.json"
+            if old_file.exists():
+                self._migrate_old_format(user_id, old_file)
+                return
             return
 
         try:
@@ -481,6 +536,86 @@ class SemanticMemory:
                 )
         except Exception:
             pass
+
+    def _migrate_old_format(self, user_id: str, old_file: Path):
+        """迁移旧格式数据"""
+        try:
+            data = json.loads(old_file.read_text())
+            for mid, item_data in data.get("memories", {}).items():
+                self._memories[user_id][mid] = SemanticMemoryItem.from_dict(item_data)
+            for fb_data in data.get("feedbacks", []):
+                self._feedbacks[user_id].append(
+                    UserFeedback(
+                        feedback_id=fb_data["feedback_id"],
+                        memory_id=fb_data["memory_id"],
+                        rating=fb_data["rating"],
+                        comment=fb_data.get("comment"),
+                        timestamp=fb_data.get("timestamp", 0),
+                    )
+                )
+            # 保存为新格式
+            self._save_user(user_id)
+            # 删除旧文件
+            old_file.unlink()
+        except Exception:
+            pass
+
+    def _save_markdown(
+        self,
+        user_id: str,
+        memory_id: str,
+        content: str,
+        category: MemoryCategory,
+        tags: Optional[List[str]] = None,
+    ):
+        """保存 Markdown 内容文件"""
+        if not self._storage_path:
+            return
+
+        reflections_dir = self._get_reflections_dir(user_id)
+        reflections_dir.mkdir(parents=True, exist_ok=True)
+
+        md_path = reflections_dir / f"{memory_id}.md"
+
+        # 生成 Markdown 文件（带 front-matter）
+        front_matter = f"""---
+memory_id: {memory_id}
+category: {category.value}
+tags: {json.dumps(tags or [], ensure_ascii=False)}
+created_at: {time.strftime("%Y-%m-%d %H:%M:%S")}
+---
+
+"""
+        md_path.write_text(front_matter + content, encoding="utf-8")
+
+    def get_markdown_content(self, user_id: str, memory_id: str) -> Optional[str]:
+        """获取记忆的 Markdown 详细内容"""
+        if not self._storage_path:
+            return None
+
+        md_path = self._get_reflections_dir(user_id) / f"{memory_id}.md"
+        if not md_path.exists():
+            return None
+
+        try:
+            content = md_path.read_text(encoding="utf-8")
+            # 去除 front-matter
+            if content.startswith("---"):
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    return parts[2].strip()
+            return content
+        except Exception:
+            return None
+
+    def delete_markdown(self, user_id: str, memory_id: str):
+        """删除 Markdown 文件"""
+        if not self._storage_path:
+            return
+
+        md_path = self._get_reflections_dir(user_id) / f"{memory_id}.md"
+        if md_path.exists():
+            md_path.unlink()
 
     def cleanup_expired(self, user_id: str) -> int:
         """清理过期记忆"""

@@ -48,9 +48,26 @@ class MemorySource(Enum):
 @dataclass
 class SemanticMemoryItem:
     """
-    L2 长期语义记忆条目 (JSON 结构化)
+    L2 长期语义记忆条目 (JSON 索引层)
 
-    用于系统层决策：命中判断、注入优先级、学习更新
+    设计原则（来自 MEMORY.md）：
+    - JSON 负责：是否命中、是否注入上下文、注入优先级判断、学习与权重更新
+    - content 字段存储简短摘要，详细内容通过 summary_md_ref 引用 Markdown 文件
+
+    示例：
+    {
+        "memory_id": "mem_20251214_001",
+        "layer": "L2",
+        "category": "work",
+        "subcategory": "agent_design",
+        "tags": ["memory", "architecture"],
+        "content": "用户倾向于使用分层记忆以控制 token 使用",  # 简短摘要
+        "confidence": 0.9,
+        "reward": 1,
+        "source": "user_feedback",
+        "created_at": 1734134400,
+        "summary_md_ref": "reflections/mem_20251214_001.md"  # 详细内容
+    }
     """
 
     memory_id: str
@@ -58,7 +75,7 @@ class SemanticMemoryItem:
     category: MemoryCategory = MemoryCategory.CUSTOM
     subcategory: str = ""
     tags: List[str] = field(default_factory=list)
-    content: str = ""  # 核心内容
+    content: str = ""  # 简短摘要（用于检索和决策）
     confidence: float = 0.5  # 置信度 0-1
     reward: float = 0.0  # 奖励分数（用户反馈累积）
     source: MemorySource = MemorySource.AGENT_INFERENCE
@@ -67,7 +84,7 @@ class SemanticMemoryItem:
     access_count: int = 0  # 访问次数
     last_accessed_at: Optional[int] = None
     expires_at: Optional[int] = None  # 过期时间
-    summary_md_ref: Optional[str] = None  # 关联的 Markdown 文件路径
+    summary_md_ref: Optional[str] = None  # 关联的 Markdown 文件路径（详细内容）
     metadata: Dict[str, Any] = field(default_factory=dict)
     needs_revision: bool = False  # 是否需要修订
 

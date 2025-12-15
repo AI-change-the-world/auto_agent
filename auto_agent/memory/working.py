@@ -170,41 +170,68 @@ class WorkingMemory:
         """
         提取可转化为长期记忆的内容
 
-        返回潜在的 L2 记忆候选
-        """
-        candidates = []
+        根据设计文档，L2 记忆应该是：
+        - 可复用的策略/方法论
+        - 用户偏好
+        - 抽象的知识/经验
 
-        # 提取成功的策略
+        而不是：
+        - 具体的执行日志
+        - 工具调用历史
+        - 临时的错误信息
+
+        返回：
+        - 空列表（默认不自动提炼，需要显式调用或 LLM 辅助提炼）
+        - 或者只返回真正有价值的抽象知识
+
+        注意：执行历史应该保留在 L1 或 DocHive 的执行记录中，
+        而不是直接存入 L2 长期记忆。
+        """
+        # 默认不自动提炼执行历史到 L2
+        # 原因：
+        # 1. 执行历史是临时的、具体的，不适合作为长期记忆
+        # 2. 真正的策略提炼需要 LLM 辅助或人工确认
+        # 3. 避免 L2 被大量低质量的执行日志污染
+        #
+        # 如果需要提炼，应该：
+        # 1. 使用 LLM 从执行历史中抽象出可复用的策略
+        # 2. 或者让用户显式确认哪些经验值得保存
+        # 3. 或者在多次相似任务后，自动识别模式
+        
+        return []
+    
+    def get_execution_summary(self) -> Dict[str, Any]:
+        """
+        获取执行摘要（供外部分析或 LLM 提炼使用）
+        
+        这个方法返回执行历史的结构化摘要，
+        但不直接转化为 L2 记忆。
+        """
         successful_tools = [
             i for i in self._items if i.item_type == "tool_call" and i.content.get("success")
         ]
-
-        if successful_tools:
-            # 提取成功的工具链
-            tool_chain = [tc.content.get("tool") for tc in successful_tools]
-            candidates.append({
-                "type": "strategy",
-                "content": f"成功执行工具链: {' -> '.join(tool_chain)}",
-                "category": "strategy",
-                "source": "task_result",
-            })
-
-        # 提取失败的经验
         failed_tools = [
             i for i in self._items if i.item_type == "tool_call" and not i.content.get("success")
         ]
-
-        for ft in failed_tools:
-            error = ft.content.get("result", {}).get("error", "未知错误")
-            candidates.append({
-                "type": "strategy",
-                "content": f"工具 {ft.content.get('tool')} 失败: {error}",
-                "category": "strategy",
-                "source": "task_result",
-                "is_negative": True,
-            })
-
-        return candidates
+        decisions = [i for i in self._items if i.item_type == "decision"]
+        
+        return {
+            "query": self._query,
+            "task_id": self._task_id,
+            "duration": self.duration,
+            "total_steps": len([i for i in self._items if i.item_type == "tool_call"]),
+            "successful_steps": len(successful_tools),
+            "failed_steps": len(failed_tools),
+            "tool_chain": [tc.content.get("tool") for tc in successful_tools],
+            "failures": [
+                {
+                    "tool": ft.content.get("tool"),
+                    "error": ft.content.get("result", {}).get("error", "未知错误"),
+                }
+                for ft in failed_tools
+            ],
+            "decisions": [d.content for d in decisions],
+        }
 
     def _prune(self):
         """修剪记忆，保留关键条目"""

@@ -40,8 +40,10 @@ class MemorySystem:
         storage_path: Optional[str] = None,
         auto_save: bool = True,
         token_budget: int = 2000,
+        llm_client: Optional[Any] = None,
     ):
         self.storage_path = storage_path
+        self._llm_client = llm_client
 
         # L1: 短时记忆（每个任务独立）
         self._working_memories: Dict[str, WorkingMemory] = {}
@@ -57,12 +59,18 @@ class MemorySystem:
             storage_path=storage_path,
         )
 
-        # 记忆路由器
+        # 智能记忆路由器（支持 LLM 辅助）
         self.router = MemoryRouter(
             semantic_memory=self.semantic,
             narrative_memory=self.narrative,
+            llm_client=llm_client,
             default_token_budget=token_budget,
         )
+
+    def set_llm_client(self, llm_client: Any):
+        """设置 LLM 客户端（用于智能记忆检索）"""
+        self._llm_client = llm_client
+        self.router.llm_client = llm_client
 
     # ==================== L1 短时记忆 ====================
 
@@ -79,24 +87,58 @@ class MemorySystem:
         self._working_memories[actual_task_id] = wm
         return actual_task_id
 
-    def end_task(self, user_id: str, task_id: str, promote_to_long_term: bool = True):
+    def end_task(
+        self,
+        user_id: str,
+        task_id: str,
+        promote_to_long_term: bool = False,
+        llm_client: Optional[Any] = None,
+    ):
         """
         结束任务
 
-        可选：将短时记忆中的有价值内容提炼到长期记忆
+        Args:
+            user_id: 用户 ID
+            task_id: 任务 ID
+            promote_to_long_term: 是否提炼到长期记忆（默认 False）
+            llm_client: LLM 客户端（用于智能提炼，可选）
+
+        注意：
+        - 默认不自动提炼执行历史到 L2
+        - 执行历史应该保留在 DocHive 的执行记录中
+        - 只有真正有价值的抽象知识才应该进入 L2
+        - 如果需要提炼，建议使用 LLM 辅助或人工确认
         """
         wm = self._working_memories.get(task_id)
         if not wm:
             return
 
-        if promote_to_long_term:
-            # 提取候选记忆
-            candidates = wm.extract_for_long_term()
-            # 提炼到 L2
-            self.semantic.promote_from_working(user_id, candidates)
+        if promote_to_long_term and llm_client:
+            # 使用 LLM 智能提炼（未来实现）
+            # 从执行摘要中抽象出可复用的策略
+            summary = wm.get_execution_summary()
+            # TODO: 调用 LLM 分析执行摘要，提取可复用的策略
+            # candidates = await self._llm_extract_strategies(llm_client, summary)
+            # self.semantic.promote_from_working(user_id, candidates)
+            pass
 
         # 清理短时记忆
         del self._working_memories[task_id]
+    
+    def get_task_summary(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取任务执行摘要（供外部分析使用）
+        
+        这个方法返回执行历史的结构化摘要，
+        可用于：
+        - 生成执行报告
+        - LLM 辅助提炼策略
+        - 人工审核后添加到 L2
+        """
+        wm = self._working_memories.get(task_id)
+        if not wm:
+            return None
+        return wm.get_execution_summary()
 
     # ==================== L2 长期记忆 ====================
 
@@ -168,7 +210,7 @@ class MemorySystem:
         token_budget: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        为查询获取记忆上下文
+        为查询获取记忆上下文（同步版本）
 
         返回：
         - context: 可直接注入 Prompt 的文本
@@ -195,6 +237,42 @@ class MemorySystem:
             query=query,
             token_budget=budget,
             include_narrative=config["use_l3_narrative"],
+        )
+
+    async def load_context(
+        self,
+        user_id: str,
+        query: str,
+        token_budget: Optional[int] = None,
+        summarize: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        智能加载记忆上下文（异步版本，推荐使用）
+
+        使用 LLM 进行：
+        1. 查询意图分析
+        2. 智能记忆检索
+        3. 上下文总结
+
+        Args:
+            user_id: 用户 ID
+            query: 用户查询
+            token_budget: Token 预算
+            summarize: 是否使用 LLM 总结上下文
+
+        Returns:
+            {
+                "context": str,  # 可直接注入 Prompt 的上下文
+                "memories": List,  # 命中的记忆
+                "analysis": Dict,  # 查询分析结果
+                "token_estimate": int,  # 估计的 token 数
+            }
+        """
+        return await self.router.load_context(
+            user_id=user_id,
+            query=query,
+            token_budget=token_budget,
+            summarize=summarize,
         )
 
     # ==================== 记忆总结与反思 ====================

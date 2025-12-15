@@ -10,15 +10,20 @@ AutoAgent 主类
 6. 智能回退
 7. 结果聚合
 8. 更新记忆
+
+架构说明：
+- AutoAgent 是面向用户的高级 API
+- 内部使用 TaskPlanner 进行规划
+- 内部使用 ExecutionEngine 进行执行
+- Memory 系统由 ExecutionEngine 内部管理
 """
 
 import time
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
-from auto_agent.core.orchestrator import AgentOrchestrator
+from auto_agent.core.executor import ExecutionEngine
+from auto_agent.core.planner import TaskPlanner
 from auto_agent.llm.client import LLMClient
-from auto_agent.memory.long_term import LongTermMemory
-from auto_agent.memory.short_term import ShortTermMemory
 from auto_agent.models import AgentResponse, ExecutionPlan, Message, PlanStep
 from auto_agent.retry.models import RetryConfig
 from auto_agent.tools.registry import ToolRegistry
@@ -28,38 +33,46 @@ class AutoAgent:
     """
     Auto-Agent 主类
 
-    核心改进（来自 custom_agent_executor_v2.py）：
+    核心改进：
     1. 执行时由 LLM 动态规划步骤
     2. 使用统一 state dict 管理数据流
     3. 自然语言描述期望，而非符号化 checkpoint
     4. 明确回退策略表
-    5. 短期记忆智能压缩
+    5. Memory 系统由 ExecutionEngine 内部管理
     """
 
     def __init__(
         self,
         llm_client: LLMClient,
         tool_registry: ToolRegistry,
-        long_term_memory: LongTermMemory,
-        short_term_memory: ShortTermMemory,
         retry_config: Optional[RetryConfig] = None,
+        agent_name: str = "",
+        agent_description: str = "",
         agent_goals: Optional[List[str]] = None,
         agent_constraints: Optional[List[str]] = None,
+        memory_storage_path: Optional[str] = None,
     ):
         self.llm_client = llm_client
         self.tool_registry = tool_registry
-        self.ltm = long_term_memory
-        self.stm = short_term_memory
+        self.agent_name = agent_name
+        self.agent_description = agent_description
         self.agent_goals = agent_goals or []
         self.agent_constraints = agent_constraints or []
 
-        # 初始化编排器
-        self.orchestrator = AgentOrchestrator(
+        # 初始化规划器
+        self.planner = TaskPlanner(
             llm_client=llm_client,
             tool_registry=tool_registry,
-            retry_config=retry_config or RetryConfig(),
             agent_goals=agent_goals,
             agent_constraints=agent_constraints,
+        )
+
+        # 初始化执行引擎（Memory 系统由 ExecutionEngine 内部管理）
+        self.executor = ExecutionEngine(
+            tool_registry=tool_registry,
+            retry_config=retry_config or RetryConfig(),
+            llm_client=llm_client,
+            memory_storage_path=memory_storage_path,
         )
 
     async def run(
@@ -69,10 +82,10 @@ class AutoAgent:
         conversation_id: Optional[str] = None,
         template_id: Optional[int] = None,
         initial_plan: Optional[List[Dict[str, Any]]] = None,
-        stream: bool = False,
+        tool_executor: Optional[Callable] = None,
     ) -> AgentResponse:
         """
-        执行智能体任务
+        执行智能体任务（非流式）
 
         Args:
             query: 用户查询
@@ -80,62 +93,60 @@ class AutoAgent:
             conversation_id: 对话ID（可选）
             template_id: 模板ID（可选）
             initial_plan: 初始计划（含固定步骤）
-            stream: 是否流式返回
+            tool_executor: 自定义工具执行器
 
         Returns:
             AgentResponse
         """
-        # Step 1: 加载长期记忆
-        user_context = self.ltm.get_relevant_context(user_id, query)
-
-        # Step 2: 创建或获取对话
-        if not conversation_id:
-            conversation_id = self.stm.create_conversation(user_id)
-
-        # Step 3: 添加用户消息
-        self.stm.add_message(
-            conversation_id,
-            Message(
-                role="user", content=query, timestamp=int(time.time()), metadata={}
-            ),
-        )
-
-        # Step 4: 获取对话上下文（压缩版）
-        conversation_context = self.stm.summarize_conversation(conversation_id)
-
-        # Step 5: 初始化状态字典
-        state = self._initialize_state(query, template_id)
-
-        # Step 6: 使用编排器执行（规划+执行）
-        plan, results, final_state = await self.orchestrator.execute(
+        # Step 1: 规划
+        plan = await self.planner.plan(
             query=query,
-            user_context=user_context,
-            conversation_context=conversation_context,
-            conversation_id=conversation_id,
-            initial_state=state,
+            user_context="",
+            conversation_context="",
             initial_plan=initial_plan,
         )
 
-        # Step 7: 聚合结果
-        final_response = await self._aggregate_results(results, plan, final_state)
+        if plan.errors:
+            return AgentResponse(
+                content=f"规划失败: {plan.errors}",
+                conversation_id=conversation_id or "",
+                plan=plan,
+                execution_results=[],
+                iterations=0,
+            )
 
-        # Step 8: 添加助手消息
-        self.stm.add_message(
-            conversation_id,
-            Message(
-                role="assistant",
-                content=final_response,
-                timestamp=int(time.time()),
-                metadata={"plan": plan.__dict__, "results": [r.__dict__ for r in results]},
-            ),
-        )
+        # Step 2: 初始化状态
+        state = self._initialize_state(query, template_id, plan.state_schema)
 
-        # Step 9: 更新长期记忆
-        await self._update_long_term_memory(user_id, conversation_id, plan, results)
+        # Step 3: 执行（使用 ExecutionEngine）
+        agent_info = {
+            "name": self.agent_name,
+            "description": self.agent_description,
+            "goals": self.agent_goals,
+            "constraints": self.agent_constraints,
+            "user_id": user_id,
+        }
+
+        results = []
+        final_state = state
+        
+        async for event in self.executor.execute_plan_stream(
+            plan=plan,
+            state=state,
+            conversation_id=conversation_id or "",
+            tool_executor=tool_executor,
+            agent_info=agent_info,
+        ):
+            if event["event"] == "execution_complete":
+                final_state = event["data"]["state"]
+                results = event["data"]["results"]
+
+        # Step 4: 聚合结果
+        final_response = self._aggregate_results(final_state)
 
         return AgentResponse(
             content=final_response,
-            conversation_id=conversation_id,
+            conversation_id=conversation_id or "",
             plan=plan,
             execution_results=results,
             iterations=final_state.get("control", {}).get("iterations", 0),
@@ -148,40 +159,25 @@ class AutoAgent:
         conversation_id: Optional[str] = None,
         template_id: Optional[int] = None,
         initial_plan: Optional[List[Dict[str, Any]]] = None,
+        tool_executor: Optional[Callable] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行智能体任务
+
+        直接复用 ExecutionEngine.execute_plan_stream()
 
         Yields:
             事件字典，包含：
             - event: 事件类型 (planning/stage_start/stage_complete/answer/done)
             - data: 事件数据
         """
-        # Step 1: 加载记忆
-        user_context = self.ltm.get_relevant_context(user_id, query)
-
-        if not conversation_id:
-            conversation_id = self.stm.create_conversation(user_id)
-
-        self.stm.add_message(
-            conversation_id,
-            Message(
-                role="user", content=query, timestamp=int(time.time()), metadata={}
-            ),
-        )
-
-        conversation_context = self.stm.summarize_conversation(conversation_id)
-
-        # Step 2: 初始化状态
-        state = self._initialize_state(query, template_id)
-
-        # Step 3: 规划阶段
+        # Step 1: 规划阶段
         yield {"event": "planning", "data": {"message": "正在规划执行步骤..."}}
 
-        plan = await self.orchestrator.planner.plan(
+        plan = await self.planner.plan(
             query=query,
-            user_context=user_context,
-            conversation_context=conversation_context,
+            user_context="",
+            conversation_context="",
             initial_plan=initial_plan,
         )
 
@@ -192,36 +188,53 @@ class AutoAgent:
         yield {
             "event": "execution_plan",
             "data": {
-                "steps": [s.__dict__ for s in plan.subtasks],
+                "agent_name": self.agent_name,
+                "description": self.agent_description,
+                "steps": [
+                    {
+                        "step": i + 1,
+                        "step_id": s.id,
+                        "name": s.tool,
+                        "description": s.description,
+                        "expectations": s.expectations,
+                        "on_fail_strategy": s.on_fail_strategy,
+                        "is_pinned": s.is_pinned,
+                    }
+                    for i, s in enumerate(plan.subtasks)
+                ],
                 "state_schema": plan.state_schema,
                 "warnings": plan.warnings,
             },
         }
 
-        # Step 4: 执行阶段
-        results = []
+        # Step 2: 初始化状态
+        state = self._initialize_state(query, template_id, plan.state_schema)
 
-        async def on_step_complete(subtask: PlanStep, result):
-            yield_data = {
-                "event": "stage_complete",
-                "data": {
-                    "step": subtask.id,
-                    "name": subtask.tool,
-                    "description": subtask.description,
-                    "success": result.success,
-                    "status": "completed" if result.success else "failed",
-                },
-            }
-            # 注意：这里不能直接 yield，需要通过回调处理
+        # Step 3: 执行阶段（直接复用 ExecutionEngine.execute_plan_stream）
+        agent_info = {
+            "name": self.agent_name,
+            "description": self.agent_description,
+            "goals": self.agent_goals,
+            "constraints": self.agent_constraints,
+            "user_id": user_id,
+        }
 
-        results, final_state = await self.orchestrator.executor.execute_plan(
+        final_state = state
+        async for event in self.executor.execute_plan_stream(
             plan=plan,
             state=state,
-            conversation_id=conversation_id,
-        )
+            conversation_id=conversation_id or "",
+            tool_executor=tool_executor,
+            agent_info=agent_info,
+        ):
+            # 转发执行事件
+            if event["event"] != "execution_complete":
+                yield event
+            else:
+                final_state = event["data"]["state"]
 
-        # Step 5: 生成答案
-        final_response = await self._aggregate_results(results, plan, final_state)
+        # Step 4: 生成答案
+        final_response = self._aggregate_results(final_state)
 
         yield {
             "event": "answer",
@@ -233,7 +246,7 @@ class AutoAgent:
             },
         }
 
-        # Step 6: 完成
+        # Step 5: 完成
         yield {
             "event": "done",
             "data": {
@@ -244,10 +257,13 @@ class AutoAgent:
         }
 
     def _initialize_state(
-        self, query: str, template_id: Optional[int]
+        self,
+        query: str,
+        template_id: Optional[int],
+        state_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """初始化统一状态字典"""
-        return {
+        state = {
             "inputs": {
                 "query": query,
                 "template_id": template_id,
@@ -259,9 +275,24 @@ class AutoAgent:
             },
         }
 
-    async def _aggregate_results(
-        self, results, plan: ExecutionPlan, state: Dict[str, Any]
-    ) -> str:
+        # 根据 state_schema 初始化字段
+        if state_schema:
+            for field, defn in state_schema.items():
+                if field in ["inputs", "control"]:
+                    continue
+                if isinstance(defn, dict):
+                    ftype = defn.get("type", "dict")
+                    state[field] = (
+                        [] if ftype == "list" else ({} if ftype == "dict" else defn.get("default"))
+                    )
+                elif isinstance(defn, str):
+                    state[field] = [] if defn == "list" else ({} if defn == "dict" else None)
+                else:
+                    state[field] = {}
+
+        return state
+
+    def _aggregate_results(self, state: Dict[str, Any]) -> str:
         """聚合执行结果"""
         # 检查是否有最终文档
         final_document = state.get("reviewed_document") or state.get("composed_document")
@@ -273,17 +304,12 @@ class AutoAgent:
         if documents:
             return f"检索到 {len(documents)} 个相关文档"
 
-        # 简单拼接成功的输出
-        outputs = [r.output for r in results if r.success and r.output]
-        if outputs:
-            return "\n".join(str(o) for o in outputs)
-
         return "任务执行完成"
 
-    async def _update_long_term_memory(
-        self, user_id: str, conversation_id: str, plan: ExecutionPlan, results
-    ):
-        """更新长期记忆（提取关键信息）"""
-        # 简化实现：暂不自动更新
-        # TODO: 使用 LLM 提取关键信息并保存
-        pass
+    def get_context(self):
+        """获取当前执行上下文"""
+        return self.executor.get_context()
+
+    def get_context_summary(self) -> str:
+        """获取执行上下文摘要"""
+        return self.executor.get_context_summary()
