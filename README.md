@@ -8,12 +8,14 @@
 
 Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主规划、工具调用、记忆管理等核心能力。
 
+*本项目最初在 [DocHive](https://github.com/AI-change-the-world/DocHive) 中进行设计和验证，用于智能体的自动化构建，现已独立拆分为一个 Python package。由于仍处于早期发展阶段，部分功能可能尚未完全稳定，相关 API 在后续版本中可能会有所变动。*
+
 ## 🌟 核心特性
 
 - 🤖 **自主规划**：基于 LLM 的任务分解和执行计划生成
 - 🔧 **工具系统**：灵活的工具注册机制，支持装饰器快速定义
-- 🔄 **重试机制**：智能错误处理和自动重试
-- 🧠 **双层记忆**：长期记忆 + 短期记忆（支持智能压缩）
+- 🔄 **智能重试**：LLM 驱动的错误分析、参数修正和策略学习
+- 🧠 **三层记忆**：L1 短时记忆 + L2 语义记忆 + L3 叙事记忆
 - 📊 **分类记忆**：用户反馈、行为模式、偏好、知识等分类存储
 - 🎯 **意图路由**：自动识别用户意图并路由到合适的处理流程
 - 📝 **执行报告**：Mermaid 流程图 + Markdown 报告生成
@@ -28,29 +30,22 @@ Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主
 ```bash
 git clone https://github.com/AI-change-the-world/auto_agent.git
 cd auto_agent
-pip install -e ".[dev]"
+pip install -e .
 ```
 
-### 环境配置
+### Example
+
+[deep_research_demo](./examples/deep_research_demo.py)
 
 ```bash
-# DeepSeek (推荐)
-export DEEPSEEK_API_KEY=your-api-key
-
-# 或 OpenAI
+# 配置 OpenAI
 export OPENAI_API_KEY=your-api-key
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_MODEL=gpt-4o-mini
 ```
 
-### 运行示例
-
 ```bash
-# 完整功能演示
-python examples/full_demo.py
-
-# 文档写作智能体示例
-python examples/writer_agent_demo.py
+python examples/deep_research_demo.py
 ```
 
 ## 🔧 工具定义
@@ -226,11 +221,15 @@ for step in plan.subtasks:
 
 ## 🧠 记忆系统
 
-Auto-Agent 提供两套记忆系统：新的 L1/L2/L3 三层架构（推荐）和兼容的旧接口。
+Auto-Agent 提供先进的 L1/L2/L3 三层记忆架构，支持反馈学习、智能注入和错误恢复策略记忆化。
 
-### 新架构：三层记忆系统 (推荐) ✨
+### 三层记忆架构 ✨
 
-基于 `docs/MEMORY.md` 设计，支持反馈学习和智能注入：
+| 层级 | 名称 | 存储格式 | 生命周期 | 用途 |
+|------|------|----------|----------|------|
+| **L1** | 短时记忆 (WorkingMemory) | 内存 | 单次任务 | 执行上下文、中间决策、工具调用记录 |
+| **L2** | 语义记忆 (SemanticMemory) | JSON | 长期持久化 | 用户偏好、知识、策略、错误恢复经验 |
+| **L3** | 叙事记忆 (NarrativeMemory) | Markdown | 长期持久化 | 高语义密度总结、Prompt 注入 |
 
 ```python
 from auto_agent import MemorySystem, MemoryCategory, MemorySource
@@ -316,6 +315,103 @@ should_use, reason = router.should_use_memory("帮我写代码")  # True, "领�
 # 获取注入配置
 config = router.get_memory_injection_config("总结经验")
 # {"use_l3_narrative": True, "token_budget": 3000, "priority": "recency"}
+```
+
+## 🔄 智能重试机制
+
+Auto-Agent 提供 LLM 驱动的智能重试机制，能够分析错误原因、自动修正参数，并从成功的恢复策略中学习。
+
+### 核心能力
+
+| 能力 | 说明 |
+|------|------|
+| **智能错误分析** | 使用 LLM 分析错误类型、根因和可恢复性 |
+| **参数自动修正** | 当检测到参数错误时，自动推断正确参数值 |
+| **策略学习** | 将成功的恢复策略记录到 L2 记忆，供后续复用 |
+| **历史策略优先** | 遇到类似错误时，优先使用历史成功策略 |
+
+### 错误类型与恢复策略
+
+| 错误类型 | 可恢复性 | 默认策略 |
+|---------|---------|---------|
+| `PARAMETER_ERROR` | 高 | LLM 修正参数后重试 |
+| `NETWORK_ERROR` | 高 | 指数退避重试 |
+| `TIMEOUT_ERROR` | 中 | 增加超时后重试 |
+| `RESOURCE_ERROR` | 中 | 等待或切换资源 |
+| `LOGIC_ERROR` | 低 | 触发重规划 |
+| `PERMISSION_ERROR` | 低 | 中止并报告 |
+
+### 使用示例
+
+```python
+from auto_agent.retry import RetryController, RetryConfig, ErrorType
+
+# 创建带 LLM 的重试控制器
+retry_controller = RetryController(
+    config=RetryConfig(max_retries=3),
+    llm_client=llm_client,
+)
+
+# 智能错误分析
+error_analysis = await retry_controller.analyze_error(
+    exception=e,
+    context={"state": state, "arguments": args},
+    tool_definition=tool.definition,
+    memory_system=memory,  # 可选：启用历史策略查询
+)
+
+# 参数修正建议
+if error_analysis.error_type == ErrorType.PARAMETER_ERROR:
+    fixed_params = await retry_controller.suggest_parameter_fixes(
+        failed_params=args,
+        error_analysis=error_analysis,
+        context={"state": state},
+    )
+
+# 记录成功的恢复策略（自动学习）
+await retry_controller.record_successful_recovery(
+    original_error=e,
+    tool_name="search_documents",
+    original_params=original_args,
+    fixed_params=fixed_params,
+    memory_system=memory,
+)
+```
+
+### 错误恢复流程
+
+```
+执行失败
+    │
+    ▼
+┌─────────────────┐
+│ 查询历史策略    │ ← 优先使用 L2 记忆中的成功策略
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    │ 有匹配？ │
+    └────┬────┘
+         │
+    ┌────┴────┐
+   是        否
+    │         │
+    ▼         ▼
+使用历史   LLM 分析
+策略重试   错误原因
+    │         │
+    └────┬────┘
+         │
+         ▼
+    ┌─────────┐
+    │ 成功？  │
+    └────┬────┘
+         │
+    ┌────┴────┐
+   是        否
+    │         │
+    ▼         ▼
+记录策略   继续重试
+到 L2     或重规划
 ```
 
 ### 旧接口：分类记忆 (CategorizedMemory)
@@ -480,22 +576,28 @@ if result["success"]:
 ┌─────────────────────────────────────────────────────────────┐
 │                    TaskPlanner                              │
 │         规划执行步骤，编排工具链                              │
+│                  ↑ 记忆注入 (MemoryRouter)                   │
 └──────────────────────────┬──────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                  Execution Engine                           │
-│ ┌─────────────┐ ┌──────────────┐ ┌──────────────┐          │
-│ │ Tool        │ │ Retry        │ │ Result       │          │
-│ │ Registry    │→│ Controller   │→│ Compressor   │          │
-│ └─────────────┘ └──────────────┘ └──────────────┘          │
-└──────────────────────────┬──────────────────────────────────┘
+│ ┌─────────────┐ ┌──────────────────┐ ┌──────────────┐      │
+│ │ Tool        │ │ Smart Retry      │ │ Result       │      │
+│ │ Registry    │→│ Controller       │→│ Compressor   │      │
+│ └─────────────┘ │ + LLM 错误分析   │ └──────────────┘      │
+│                 │ + 参数自动修正   │                        │
+│                 │ + 动态重规划     │                        │
+│                 └────────┬─────────┘                        │
+└──────────────────────────┼──────────────────────────────────┘
+                           │ 策略学习
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Memory System                            │
-│ ┌───────────────────┐ ┌───────────────────┐                │
-│ │ CategorizedMemory │ │ ShortTermMemory   │                │
-│ │ (用户级持久化)     │ │ (对话级+压缩)     │                │
-│ └───────────────────┘ └───────────────────┘                │
+│                    Memory System (L1/L2/L3)                 │
+│ ┌───────────────┐ ┌───────────────┐ ┌───────────────┐      │
+│ │ L1 Working    │ │ L2 Semantic   │ │ L3 Narrative  │      │
+│ │ (任务上下文)  │ │ (长期记忆)    │ │ (叙事总结)    │      │
+│ │               │ │ + 错误恢复策略│ │               │      │
+│ └───────────────┘ └───────────────┘ └───────────────┘      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -577,11 +679,12 @@ pytest tests/ --cov=auto_agent --cov-report=html
 | `IntentRouter`             | 意图路由器                 |
 | `TaskPlanner`              | 任务规划器                 |
 | `SessionManager`           | 会话管理器                 |
-| `MemorySystem`             | 统一记忆系统 (新架构)      |
+| `MemorySystem`             | 统一记忆系统 (L1/L2/L3)    |
 | `WorkingMemory`            | L1 短时记忆                |
 | `SemanticMemory`           | L2 长期语义记忆            |
 | `NarrativeMemoryManager`   | L3 叙事记忆                |
 | `MemoryRouter`             | 记忆路由器                 |
+| `RetryController`          | 智能重试控制器             |
 | `CategorizedMemory`        | 分类记忆系统 (旧接口)      |
 | `ShortTermMemory`          | 短期记忆 (旧接口)          |
 | `ExecutionReportGenerator` | 执行报告生成器             |
@@ -596,19 +699,24 @@ pytest tests/ --cov=auto_agent --cov-report=html
 
 ### 数据模型
 
-| 模型                 | 描述            |
-| -------------------- | --------------- |
-| `ToolDefinition`     | 工具定义        |
-| `ToolParameter`      | 工具参数        |
-| `ExecutionPlan`      | 执行计划        |
-| `PlanStep`           | 计划步骤        |
-| `SubTaskResult`      | 子任务结果      |
-| `Session`            | 会话            |
-| `MemoryItem`         | 记忆条目        |
-| `MemoryCategory`     | 记忆分类枚举    |
-| `SemanticMemoryItem` | L2 语义记忆条目 |
-| `UserFeedback`       | 用户反馈        |
-| `QueryIntent`        | 查询意图枚举    |
+| 模型                    | 描述                |
+| ----------------------- | ------------------- |
+| `ToolDefinition`        | 工具定义 (含错误恢复配置) |
+| `ToolParameter`         | 工具参数            |
+| `ErrorRecoveryStrategy` | 错误恢复策略配置    |
+| `ParameterValidator`    | 参数验证器          |
+| `ExecutionPlan`         | 执行计划            |
+| `PlanStep`              | 计划步骤            |
+| `SubTaskResult`         | 子任务结果          |
+| `Session`               | 会话                |
+| `MemoryItem`            | 记忆条目            |
+| `MemoryCategory`        | 记忆分类枚举        |
+| `SemanticMemoryItem`    | L2 语义记忆条目     |
+| `UserFeedback`          | 用户反馈            |
+| `QueryIntent`           | 查询意图枚举        |
+| `ErrorType`             | 错误类型枚举        |
+| `ErrorAnalysis`         | LLM 错误分析结果    |
+| `ErrorRecoveryRecord`   | 错误恢复记录        |
 
 ## 🤝 贡献指南
 

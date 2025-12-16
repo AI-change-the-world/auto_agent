@@ -1,9 +1,16 @@
 """
-长期记忆（Long-term Memory）
+长期记忆（Long-term Memory）（已弃用）
 
 基于 Markdown 文件存储，每个用户一个文件
+
+.. deprecated::
+    此模块已弃用，请使用新的 L1/L2/L3 三层记忆架构：
+    - auto_agent.memory.system.MemorySystem（统一入口）
+    - auto_agent.memory.semantic.SemanticMemory（L2 长期语义记忆）
 """
 
+import warnings
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,9 +18,36 @@ from auto_agent.memory.base import BaseMemory
 from auto_agent.memory.models import UserMemory
 
 
+def _deprecated_class(cls):
+    """类弃用装饰器"""
+    original_init = cls.__init__
+    
+    @wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        warnings.warn(
+            f"{cls.__name__} 已弃用，请使用 MemorySystem 或 SemanticMemory 替代。"
+            f"参见 auto_agent.memory.system.MemorySystem",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        original_init(self, *args, **kwargs)
+    
+    cls.__init__ = new_init
+    return cls
+
+
+@_deprecated_class
 class LongTermMemory(BaseMemory):
     """
-    长期记忆
+    长期记忆（已弃用）
+
+    .. deprecated::
+        此类已弃用，请使用 MemorySystem 或 SemanticMemory 替代。
+        
+        迁移指南：
+        - LongTermMemory.add_fact() -> MemorySystem.add_knowledge()
+        - LongTermMemory.search_memory() -> MemorySystem.search_memory()
+        - LongTermMemory.get_relevant_context() -> MemorySystem.get_context_for_query()
 
     存储格式：Markdown 文件
     存储位置：{storage_path}/{user_id}/memory.md

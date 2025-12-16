@@ -1,20 +1,47 @@
 """
-分类记忆系统
+分类记忆系统（已弃用）
 
 支持:
 - KV 键值对存储
 - 分类管理（用户反馈、行为模式、偏好等）
 - 全文检索
 - 记忆过期和清理
+
+.. deprecated::
+    此模块已弃用，请使用新的 L1/L2/L3 三层记忆架构：
+    - auto_agent.memory.system.MemorySystem（统一入口）
+    - auto_agent.memory.semantic.SemanticMemory（L2 长期语义记忆）
+    - auto_agent.memory.working.WorkingMemory（L1 短时记忆）
+    - auto_agent.memory.narrative.NarrativeMemoryManager（L3 叙事记忆）
 """
 
 import json
 import re
 import time
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import wraps
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def _deprecated_class(cls):
+    """类弃用装饰器"""
+    original_init = cls.__init__
+    
+    @wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        warnings.warn(
+            f"{cls.__name__} 已弃用，请使用 MemorySystem 替代。"
+            f"参见 auto_agent.memory.system.MemorySystem",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        original_init(self, *args, **kwargs)
+    
+    cls.__init__ = new_init
+    return cls
 
 
 class MemoryCategory(Enum):
@@ -73,9 +100,19 @@ class MemoryItem:
         )
 
 
+@_deprecated_class
 class CategorizedMemory:
     """
-    分类记忆系统
+    分类记忆系统（已弃用）
+
+    .. deprecated::
+        此类已弃用，请使用 MemorySystem 替代。
+        
+        迁移指南：
+        - CategorizedMemory.set_preference() -> MemorySystem.set_preference()
+        - CategorizedMemory.add_knowledge() -> MemorySystem.add_knowledge()
+        - CategorizedMemory.search() -> MemorySystem.search_memory()
+        - CategorizedMemory.get_context_summary() -> MemorySystem.get_context_summary()
 
     特性:
     1. KV 键值对存储

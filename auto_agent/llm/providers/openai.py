@@ -18,7 +18,7 @@ from auto_agent.llm.client import LLMClient
 class OpenAIClient(LLMClient):
     """
     OpenAI API 客户端
-    
+
     也可用于兼容 OpenAI API 的其他提供商，如 DeepSeek、Azure OpenAI 等
     """
 
@@ -32,7 +32,7 @@ class OpenAIClient(LLMClient):
     ):
         """
         初始化 OpenAI 客户端
-        
+
         Args:
             api_key: API 密钥
             model: 模型名称
@@ -69,13 +69,13 @@ class OpenAIClient(LLMClient):
     ) -> str:
         """
         同步聊天补全
-        
+
         Args:
             messages: 消息列表
             temperature: 温度参数
             max_tokens: 最大 token 数
             **kwargs: 其他参数 (如 top_p, presence_penalty 等)
-            
+
         Returns:
             LLM 响应内容
         """
@@ -86,7 +86,7 @@ class OpenAIClient(LLMClient):
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
-        
+
         # 合并额外参数
         for key in ["top_p", "presence_penalty", "frequency_penalty", "stop"]:
             if key in kwargs:
@@ -109,12 +109,12 @@ class OpenAIClient(LLMClient):
     ) -> AsyncGenerator[str, None]:
         """
         流式聊天补全
-        
+
         Args:
             messages: 消息列表
             temperature: 温度参数
             max_tokens: 最大 token 数
-            
+
         Yields:
             流式响应片段
         """
@@ -157,13 +157,13 @@ class OpenAIClient(LLMClient):
     ) -> Dict[str, Any]:
         """
         Function Calling 支持
-        
+
         Args:
             messages: 消息列表
             tools: 工具定义列表 (OpenAI function calling 格式)
             tool_choice: 工具选择策略 ("auto", "none", 或指定工具)
             temperature: 温度参数
-            
+
         Returns:
             包含 tool_calls 或 message 的响应
         """
@@ -181,7 +181,7 @@ class OpenAIClient(LLMClient):
         )
         response.raise_for_status()
         data = response.json()
-        
+
         message = data["choices"][0]["message"]
         if message.get("tool_calls"):
             return {
@@ -203,7 +203,10 @@ class OpenAIClient(LLMClient):
     async def close(self):
         """关闭客户端连接"""
         if self._client:
-            await self._client.aclose()
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
             self._client = None
 
     async def __aenter__(self):

@@ -8,10 +8,31 @@ Execution Engine（执行引擎）
 - 状态更新
 - 内置 ExecutionContext 管理执行上下文
 - 支持 LLM 动态生成工具调用 prompt
+- 执行模式检测（循环依赖、重复失败等）
 """
 
 import asyncio
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+class PatternType(Enum):
+    """执行模式类型"""
+    CIRCULAR_DEPENDENCY = "circular_dependency"    # 循环依赖
+    REPEATED_FAILURE = "repeated_failure"          # 重复失败
+    INEFFICIENT_SEQUENCE = "inefficient_sequence"  # 低效序列
+    RESOURCE_BOTTLENECK = "resource_bottleneck"    # 资源瓶颈
+
+
+@dataclass
+class ExecutionPattern:
+    """检测到的执行模式"""
+    pattern_type: PatternType
+    description: str
+    frequency: int
+    success_rate: float
+    suggested_optimization: Optional[str] = None
 
 from auto_agent.core.context import ExecutionContext
 from auto_agent.llm.client import LLMClient
@@ -23,7 +44,7 @@ from auto_agent.models import (
     ValidationMode,
 )
 from auto_agent.retry.controller import RetryController
-from auto_agent.retry.models import RetryConfig
+from auto_agent.retry.models import ErrorRecoveryRecord, ErrorType, RetryConfig
 from auto_agent.tools.registry import ToolRegistry
 
 
@@ -317,6 +338,40 @@ class ExecutionEngine:
                         "error": str(e),
                     },
                 }
+                # 记录异常到结果中用于重规划检测
+                results.append(SubTaskResult(
+                    step_id=subtask.id,
+                    success=False,
+                    error=str(e),
+                ))
+
+            # 每步执行后检查是否需要重规划
+            # Requirements: 7.1, 7.3
+            if len(results) >= 3:  # 至少有 3 次执行记录才检查
+                new_plan = await self.evaluate_and_replan(
+                    current_plan=plan,
+                    execution_history=results,
+                    state=state,
+                )
+                
+                if new_plan is not None:
+                    # 发送重规划事件通知
+                    yield {
+                        "event": "stage_replan",
+                        "data": {
+                            "step": step_num,
+                            "reason": new_plan.warnings[0] if new_plan.warnings else "检测到执行问题，触发重规划",
+                            "new_plan_intent": new_plan.intent,
+                            "new_steps_count": len(new_plan.subtasks),
+                            "message": f"执行计划已重新规划，新计划包含 {len(new_plan.subtasks)} 个步骤",
+                        },
+                    }
+                    
+                    # 切换到新计划
+                    plan = new_plan
+                    current_step_index = 0
+                    # 重置迭代计数器，但保留执行历史
+                    continue
 
             current_step_index += 1
 
@@ -343,6 +398,7 @@ class ExecutionEngine:
         subtask: PlanStep,
         state: Dict[str, Any],
         conversation_id: str,
+        use_smart_retry: bool = True,
     ) -> SubTaskResult:
         """
         执行单个子任务（带重试和验证）
@@ -351,7 +407,22 @@ class ExecutionEngine:
         1. 如果有 read_fields，从 state 中读取数据
         2. 合并 subtask.parameters 中的静态参数
         3. 如果有 LLM client，可以动态构造参数
+        
+        Args:
+            subtask: 计划步骤
+            state: 当前状态字典
+            conversation_id: 对话ID
+            use_smart_retry: 是否使用智能重试（默认 True）
+                - True: 使用 LLM 驱动的智能错误分析和参数修正
+                - False: 使用传统的简单重试逻辑（向后兼容）
         """
+        # 如果启用智能重试，委托给智能重试方法
+        if use_smart_retry:
+            return await self._execute_subtask_with_smart_retry(
+                subtask, state, conversation_id
+            )
+        
+        # 以下是传统的简单重试逻辑（向后兼容）
         # 如果没有指定工具，直接返回成功
         if not subtask.tool:
             return SubTaskResult(
@@ -411,6 +482,325 @@ class ExecutionEngine:
                 success=False,
                 error=str(e),
             )
+
+    async def _execute_subtask_with_smart_retry(
+        self,
+        subtask: PlanStep,
+        state: Dict[str, Any],
+        conversation_id: str,
+    ) -> SubTaskResult:
+        """
+        带智能重试的子任务执行
+        
+        增强点：
+        1. 失败时使用 LLM 分析错误
+        2. 如果是参数错误，尝试修正参数后重试
+        3. 成功恢复后记录到记忆系统
+        
+        Args:
+            subtask: 计划步骤
+            state: 当前状态字典
+            conversation_id: 对话ID
+            
+        Returns:
+            SubTaskResult: 子任务执行结果
+        """
+        import time
+        
+        # 如果没有指定工具，直接返回成功
+        if not subtask.tool:
+            return SubTaskResult(
+                step_id=subtask.id,
+                success=True,
+                output=subtask.parameters,
+            )
+
+        # 获取工具
+        tool = self.tool_registry.get_tool(subtask.tool)
+        if not tool:
+            return SubTaskResult(
+                step_id=subtask.id,
+                success=False,
+                error=f"工具未找到: {subtask.tool}",
+            )
+
+        # 构造工具参数
+        arguments = await self._build_tool_arguments(subtask, state, tool)
+        original_arguments = dict(arguments)  # 保存原始参数用于记录
+        
+        last_exception: Optional[Exception] = None
+        max_retries = self.retry_controller.config.max_retries
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # 执行工具
+                if asyncio.iscoroutinefunction(tool.execute):
+                    output = await tool.execute(**arguments)
+                else:
+                    output = tool.execute(**arguments)
+                
+                # 如果是重试成功（attempt > 0），记录恢复策略到记忆系统
+                if attempt > 0 and last_exception is not None:
+                    await self._record_successful_recovery(
+                        exception=last_exception,
+                        tool_name=subtask.tool,
+                        original_params=original_arguments,
+                        fixed_params=arguments,
+                    )
+                
+                # 验证期望
+                if subtask.expectations and output.get("success"):
+                    passed, reason = await self._evaluate_expectations(
+                        tool=tool,
+                        result=output,
+                        expectations=subtask.expectations,
+                        state=state,
+                    )
+
+                    if not passed:
+                        return SubTaskResult(
+                            step_id=subtask.id,
+                            success=False,
+                            output=output,
+                            error=reason,
+                            expectation_failed=True,
+                            evaluation_reason=reason,
+                        )
+
+                return SubTaskResult(
+                    step_id=subtask.id,
+                    success=output.get("success", True),
+                    output=output,
+                    error=output.get("error"),
+                )
+
+            except Exception as e:
+                last_exception = e
+                
+                # 如果是最后一次尝试，尝试替代工具
+                if attempt >= max_retries:
+                    # 尝试使用替代工具 (Requirements: 6.3)
+                    alt_result = await self._try_alternative_tool(
+                        original_tool_name=subtask.tool,
+                        subtask=subtask,
+                        state=state,
+                        original_error=str(e),
+                    )
+                    if alt_result is not None:
+                        return alt_result
+                    
+                    # 所有替代工具也失败，返回原始错误
+                    return SubTaskResult(
+                        step_id=subtask.id,
+                        success=False,
+                        error=str(e),
+                    )
+                
+                # 智能错误分析
+                error_analysis = await self.retry_controller.analyze_error(
+                    exception=e,
+                    context={"state": state, "arguments": arguments},
+                    tool_definition=tool.definition if hasattr(tool, "definition") else None,
+                )
+                
+                # 如果错误不可恢复，尝试替代工具 (Requirements: 6.3)
+                if not error_analysis.is_recoverable:
+                    alt_result = await self._try_alternative_tool(
+                        original_tool_name=subtask.tool,
+                        subtask=subtask,
+                        state=state,
+                        original_error=str(e),
+                    )
+                    if alt_result is not None:
+                        return alt_result
+                    
+                    # 所有替代工具也失败，返回原始错误
+                    return SubTaskResult(
+                        step_id=subtask.id,
+                        success=False,
+                        error=f"{str(e)} (不可恢复: {error_analysis.root_cause})",
+                    )
+                
+                # 如果是参数错误，尝试修正参数
+                if error_analysis.error_type == ErrorType.PARAMETER_ERROR:
+                    fixed_arguments = await self.retry_controller.suggest_parameter_fixes(
+                        failed_params=arguments,
+                        error_analysis=error_analysis,
+                        context={"state": state},
+                        tool_definition=tool.definition if hasattr(tool, "definition") else None,
+                    )
+                    # 只有当参数确实被修改时才更新
+                    if fixed_arguments != arguments:
+                        arguments = fixed_arguments
+                
+                # 计算延迟时间并等待
+                delay = self.retry_controller.get_delay(attempt)
+                await asyncio.sleep(delay)
+        
+        # 理论上不应该到达这里，但如果到达，尝试替代工具
+        alt_result = await self._try_alternative_tool(
+            original_tool_name=subtask.tool,
+            subtask=subtask,
+            state=state,
+            original_error=str(last_exception) if last_exception else "未知错误",
+        )
+        if alt_result is not None:
+            return alt_result
+        
+        return SubTaskResult(
+            step_id=subtask.id,
+            success=False,
+            error=str(last_exception) if last_exception else "未知错误",
+        )
+
+    async def _try_alternative_tool(
+        self,
+        original_tool_name: str,
+        subtask: PlanStep,
+        state: Dict[str, Any],
+        original_error: str,
+    ) -> Optional[SubTaskResult]:
+        """
+        当工具失败且有 alternative_tools 时尝试替代工具
+        
+        遍历工具定义中的 alternative_tools 列表，依次尝试执行替代工具，
+        直到成功或所有替代工具都失败。
+        
+        Args:
+            original_tool_name: 原始失败的工具名称
+            subtask: 计划步骤
+            state: 当前状态字典
+            original_error: 原始错误信息
+            
+        Returns:
+            SubTaskResult: 替代工具执行结果，如果所有替代工具都失败则返回 None
+            
+        Requirements: 6.3, 7.2
+        """
+        # 获取原始工具定义
+        original_tool = self.tool_registry.get_tool(original_tool_name)
+        if not original_tool or not hasattr(original_tool, "definition"):
+            return None
+        
+        tool_def = original_tool.definition
+        alternative_tools = tool_def.alternative_tools if tool_def.alternative_tools else []
+        
+        if not alternative_tools:
+            return None
+        
+        # 依次尝试替代工具
+        for alt_tool_name in alternative_tools:
+            alt_tool = self.tool_registry.get_tool(alt_tool_name)
+            if not alt_tool:
+                # 替代工具不存在，跳过
+                continue
+            
+            try:
+                # 构造替代工具的参数
+                # 创建一个临时的 subtask，使用替代工具名
+                alt_subtask = PlanStep(
+                    id=subtask.id,
+                    description=subtask.description,
+                    tool=alt_tool_name,
+                    parameters=subtask.parameters,
+                    dependencies=subtask.dependencies,
+                    expectations=subtask.expectations,
+                    on_fail_strategy=subtask.on_fail_strategy,
+                    read_fields=subtask.read_fields,
+                    write_fields=subtask.write_fields,
+                    is_pinned=subtask.is_pinned,
+                    pinned_parameters=subtask.pinned_parameters,
+                    parameter_template=subtask.parameter_template,
+                    template_variables=subtask.template_variables,
+                )
+                
+                # 构造参数
+                arguments = await self._build_tool_arguments(alt_subtask, state, alt_tool)
+                
+                # 执行替代工具
+                if asyncio.iscoroutinefunction(alt_tool.execute):
+                    output = await alt_tool.execute(**arguments)
+                else:
+                    output = alt_tool.execute(**arguments)
+                
+                # 检查执行结果
+                if output.get("success", True):
+                    # 替代工具执行成功
+                    return SubTaskResult(
+                        step_id=subtask.id,
+                        success=True,
+                        output=output,
+                        metadata={
+                            "original_tool": original_tool_name,
+                            "alternative_tool": alt_tool_name,
+                            "original_error": original_error,
+                            "fallback_reason": f"原工具 {original_tool_name} 失败，使用替代工具 {alt_tool_name}",
+                        },
+                    )
+                else:
+                    # 替代工具执行失败，继续尝试下一个
+                    continue
+                    
+            except Exception as e:
+                # 替代工具执行异常，继续尝试下一个
+                continue
+        
+        # 所有替代工具都失败
+        return None
+
+    async def _record_successful_recovery(
+        self,
+        exception: Exception,
+        tool_name: str,
+        original_params: Dict[str, Any],
+        fixed_params: Dict[str, Any],
+    ) -> None:
+        """
+        记录成功的错误恢复策略到记忆系统
+        
+        Args:
+            exception: 原始异常
+            tool_name: 工具名称
+            original_params: 原始参数
+            fixed_params: 修正后的参数
+        """
+        import time
+        
+        # 如果没有记忆系统，跳过记录
+        if not self.context or not self.context.memory_system:
+            return
+        
+        try:
+            # 创建恢复记录
+            recovery_record = ErrorRecoveryRecord(
+                error_type=type(exception).__name__,
+                error_message=str(exception),
+                tool_name=tool_name,
+                original_params=original_params,
+                fixed_params=fixed_params,
+                recovery_successful=True,
+                timestamp=time.time(),
+            )
+            
+            # 转换为记忆内容
+            memory_content = recovery_record.to_memory_content()
+            
+            # 记录到 L2 语义记忆
+            memory_system = self.context.memory_system
+            if hasattr(memory_system, "add_experience"):
+                await memory_system.add_experience(
+                    category="error_recovery",
+                    content=memory_content,
+                )
+            elif hasattr(memory_system, "l2_semantic") and hasattr(memory_system.l2_semantic, "add"):
+                # 直接使用 L2 语义记忆
+                memory_system.l2_semantic.add(
+                    content=str(memory_content),
+                    metadata={"category": "error_recovery", "tool_name": tool_name},
+                )
+        except Exception:
+            # 记录失败不应影响主流程
+            pass
 
     async def _evaluate_expectations(
         self,
@@ -543,6 +933,7 @@ class ExecutionEngine:
         1. 如果有 pinned_parameters（固定参数），直接使用
         2. 如果有 read_fields，从 state 中读取
         3. 使用 LLM 智能构造剩余参数
+        4. 验证参数，验证失败时尝试修正
 
         Args:
             subtask: 计划步骤
@@ -551,6 +942,8 @@ class ExecutionEngine:
 
         Returns:
             工具参数字典
+            
+        Requirements: 5.1, 5.4
         """
         arguments = {}
 
@@ -577,6 +970,132 @@ class ExecutionEngine:
         if self.llm_client and tool:
             arguments = await self._build_arguments_with_llm_v2(subtask, state, tool, arguments)
 
+        # 5. 验证参数，验证失败时尝试修正
+        if tool:
+            arguments = await self._validate_and_fix_parameters(
+                arguments, tool, state, subtask
+            )
+
+        return arguments
+
+    async def _validate_and_fix_parameters(
+        self,
+        arguments: Dict[str, Any],
+        tool: Any,
+        state: Dict[str, Any],
+        subtask: PlanStep,
+    ) -> Dict[str, Any]:
+        """
+        验证参数并在失败时尝试修正
+        
+        逻辑：
+        1. 使用 _validate_parameters 验证参数
+        2. 如果验证失败且有 LLM client，尝试使用 LLM 修正参数
+        3. 修正后再次验证，最多尝试 2 次
+        
+        Args:
+            arguments: 要验证的参数字典
+            tool: 工具实例
+            state: 当前状态
+            subtask: 计划步骤
+            
+        Returns:
+            验证通过或修正后的参数字典
+            
+        Requirements: 5.1, 5.4
+        """
+        import json
+        
+        max_fix_attempts = 2
+        
+        for attempt in range(max_fix_attempts):
+            # 验证参数
+            is_valid, errors = self._validate_parameters(arguments, tool)
+            
+            if is_valid:
+                return arguments
+            
+            # 如果没有 LLM client，无法修正，直接返回
+            if not self.llm_client:
+                return arguments
+            
+            # 尝试使用 LLM 修正参数
+            tool_def = tool.definition
+            
+            # 构建验证器信息
+            validators_info = []
+            if tool_def.parameter_validators:
+                for v in tool_def.parameter_validators:
+                    validators_info.append({
+                        "parameter": v.parameter_name,
+                        "type": v.validation_type,
+                        "rule": v.validation_rule,
+                        "error_message": v.error_message,
+                    })
+            
+            # 构建参数信息
+            params_info = []
+            for p in tool_def.parameters:
+                params_info.append({
+                    "name": p.name,
+                    "type": p.type,
+                    "description": p.description,
+                    "required": p.required,
+                })
+            
+            # 构建修正 prompt
+            prompt = f"""你是一个参数修正助手。当前工具参数验证失败，请根据验证规则修正参数。
+
+【工具】
+名称: {tool_def.name}
+描述: {tool_def.description}
+
+【参数定义】
+{json.dumps(params_info, ensure_ascii=False, indent=2)}
+
+【验证规则】
+{json.dumps(validators_info, ensure_ascii=False, indent=2)}
+
+【当前参数】
+{json.dumps(arguments, ensure_ascii=False, indent=2)}
+
+【验证错误】
+{chr(10).join(errors)}
+
+【当前状态（可用数据）】
+{self._compress_state_for_llm(state)}
+
+【任务】
+根据验证规则修正参数值，确保参数能通过验证。
+- 仔细阅读验证规则，理解参数的约束条件
+- 从状态中找到符合约束的数据
+- 如果是范围验证，确保数值在允许范围内
+- 如果是枚举验证，确保值在允许的选项中
+- 如果是正则验证，确保值匹配正则表达式
+
+请返回修正后的完整参数 JSON：
+```json
+{{"param_name": "corrected_value", ...}}
+```"""
+
+            try:
+                response = await self.llm_client.chat(
+                    [{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                )
+                
+                # 提取 JSON
+                import re
+                json_match = re.search(r"\{[^{}]*\}", response, re.DOTALL)
+                if json_match:
+                    fixed_args = json.loads(json_match.group())
+                    # 合并修正后的参数
+                    arguments.update(fixed_args)
+            except Exception:
+                # LLM 修正失败，返回原参数
+                return arguments
+        
+        # 达到最大尝试次数，返回当前参数
         return arguments
 
     async def _build_arguments_with_llm_v2(
@@ -878,6 +1397,393 @@ class ExecutionEngine:
         if not self.context:
             return ""
         return self.context.to_llm_context()
+
+    def _detect_execution_patterns(
+        self,
+        execution_history: List[SubTaskResult],
+    ) -> List[ExecutionPattern]:
+        """
+        检测执行模式（循环、重复失败等）
+        
+        检测规则：
+        1. 重复失败模式：最近 5 次执行中有 3 次以上失败
+        2. 循环依赖模式：同一步骤执行超过 3 次
+        
+        Args:
+            execution_history: 执行历史记录列表
+            
+        Returns:
+            检测到的执行模式列表
+        """
+        patterns: List[ExecutionPattern] = []
+        
+        if not execution_history:
+            return patterns
+        
+        # 1. 检测重复失败模式（最近 5 次中 3 次以上失败）
+        recent_results = execution_history[-5:] if len(execution_history) >= 5 else execution_history
+        recent_failures = [r for r in recent_results if not r.success]
+        
+        if len(recent_failures) >= 3:
+            # 计算成功率
+            success_count = len([r for r in recent_results if r.success])
+            success_rate = success_count / len(recent_results) if recent_results else 0.0
+            
+            patterns.append(ExecutionPattern(
+                pattern_type=PatternType.REPEATED_FAILURE,
+                description=f"连续多次执行失败：最近 {len(recent_results)} 次执行中有 {len(recent_failures)} 次失败",
+                frequency=len(recent_failures),
+                success_rate=success_rate,
+                suggested_optimization="建议检查工具配置或参数，考虑使用替代工具或重新规划",
+            ))
+        
+        # 2. 检测循环依赖（同一步骤执行超过 3 次）
+        step_counts: Dict[str, int] = {}
+        for r in execution_history:
+            step_id = r.step_id
+            step_counts[step_id] = step_counts.get(step_id, 0) + 1
+        
+        for step_id, count in step_counts.items():
+            if count > 3:
+                # 计算该步骤的成功率
+                step_results = [r for r in execution_history if r.step_id == step_id]
+                step_success_count = len([r for r in step_results if r.success])
+                step_success_rate = step_success_count / len(step_results) if step_results else 0.0
+                
+                patterns.append(ExecutionPattern(
+                    pattern_type=PatternType.CIRCULAR_DEPENDENCY,
+                    description=f"步骤 {step_id} 重复执行 {count} 次，可能存在循环依赖",
+                    frequency=count,
+                    success_rate=step_success_rate,
+                    suggested_optimization="建议检查步骤依赖关系，避免循环执行",
+                ))
+        
+        return patterns
+
+    async def _generate_alternative_plan(
+        self,
+        current_plan: ExecutionPlan,
+        patterns: List[ExecutionPattern],
+        state: Dict[str, Any],
+        execution_history: List[SubTaskResult],
+    ) -> Optional[ExecutionPlan]:
+        """
+        当检测到问题模式时生成替代计划
+        
+        使用 LLM 分析失败原因并建议新策略
+        
+        Args:
+            current_plan: 当前执行计划
+            patterns: 检测到的问题模式列表
+            state: 当前状态字典
+            execution_history: 执行历史记录
+            
+        Returns:
+            新的执行计划，如果无法生成则返回 None
+            
+        Requirements: 7.1, 7.2
+        """
+        import json
+        
+        if not self.llm_client:
+            return None
+        
+        # 构建问题模式描述
+        patterns_description = "\n".join([
+            f"- {p.pattern_type.value}: {p.description} (频率: {p.frequency}, 成功率: {p.success_rate:.1%})"
+            for p in patterns
+        ])
+        
+        # 构建执行历史摘要
+        history_summary = []
+        for r in execution_history[-10:]:  # 只取最近 10 条
+            history_summary.append({
+                "step_id": r.step_id,
+                "success": r.success,
+                "error": r.error[:200] if r.error else None,  # 截断错误信息
+            })
+        
+        # 构建当前计划摘要
+        plan_summary = []
+        for step in current_plan.subtasks:
+            plan_summary.append({
+                "id": step.id,
+                "tool": step.tool,
+                "description": step.description,
+            })
+        
+        # 获取可用工具列表
+        tools_catalog = self.tool_registry.get_tools_catalog() if self.tool_registry else "无可用工具信息"
+        
+        # 构建 LLM prompt
+        prompt = f"""你是一个智能任务规划器。当前执行计划遇到了问题，需要生成替代方案。
+
+【检测到的问题模式】
+{patterns_description}
+
+【当前计划】
+{json.dumps(plan_summary, ensure_ascii=False, indent=2)}
+
+【执行历史（最近 10 条）】
+{json.dumps(history_summary, ensure_ascii=False, indent=2)}
+
+【当前状态摘要】
+{self._compress_state_for_llm(state)}
+
+【可用工具】
+{tools_catalog}
+
+【任务】
+分析失败原因，生成一个新的执行计划来完成原始目标。
+
+要求：
+1. 避免重复之前失败的步骤
+2. 如果某个工具多次失败，考虑使用替代工具
+3. 如果检测到循环依赖，重新设计步骤顺序
+4. 保留已成功执行的步骤结果
+
+请返回 JSON 格式的新计划：
+```json
+{{
+    "intent": "替代计划的意图描述",
+    "analysis": "失败原因分析",
+    "steps": [
+        {{
+            "step": 1,
+            "name": "工具名称",
+            "description": "步骤描述",
+            "read_fields": ["需要读取的字段"],
+            "write_fields": ["将写入的字段"],
+            "expectations": "期望结果",
+            "on_fail_strategy": "失败策略"
+        }}
+    ],
+    "expected_outcome": "预期结果"
+}}
+```"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,  # 较低温度，更稳定的输出
+            )
+            
+            # 提取 JSON
+            import re
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                # 尝试直接解析
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+            
+            plan_json = json.loads(response)
+            
+            # 转换为 ExecutionPlan
+            steps = plan_json.get("steps", [])
+            new_subtasks = []
+            
+            for s in steps:
+                new_subtasks.append(PlanStep(
+                    id=str(s.get("step", len(new_subtasks) + 1)),
+                    description=s.get("description", ""),
+                    tool=s.get("name", s.get("tool")),
+                    parameters=s.get("parameters", {}),
+                    dependencies=s.get("dependencies", []),
+                    expectations=s.get("expectations"),
+                    on_fail_strategy=s.get("on_fail_strategy"),
+                    read_fields=s.get("read_fields", []),
+                    write_fields=s.get("write_fields", []),
+                ))
+            
+            return ExecutionPlan(
+                intent=plan_json.get("intent", "alternative_plan"),
+                subtasks=new_subtasks,
+                expected_outcome=plan_json.get("expected_outcome"),
+                state_schema=current_plan.state_schema,  # 保留原有的 state schema
+                warnings=[f"这是替代计划，原因: {plan_json.get('analysis', '检测到执行问题')}"],
+            )
+            
+        except Exception as e:
+            # LLM 调用失败，返回 None
+            return None
+
+    async def evaluate_and_replan(
+        self,
+        current_plan: ExecutionPlan,
+        execution_history: List[SubTaskResult],
+        state: Dict[str, Any],
+        context_changed: bool = False,
+    ) -> Optional[ExecutionPlan]:
+        """
+        评估当前计划有效性，必要时动态重规划
+        
+        触发条件：
+        1. 连续失败超过阈值（最近 5 次中 3 次以上失败）
+        2. 检测到循环模式（同一步骤执行超过 3 次）
+        3. 上下文发生重大变化（context_changed=True）
+        
+        Args:
+            current_plan: 当前执行计划
+            execution_history: 执行历史记录列表
+            state: 当前状态字典
+            context_changed: 上下文是否发生变化
+            
+        Returns:
+            新的执行计划（如果需要重规划），否则返回 None
+            
+        Requirements: 7.1, 7.2, 7.3
+        """
+        # 如果上下文发生变化，强制重规划
+        if context_changed:
+            patterns = [ExecutionPattern(
+                pattern_type=PatternType.INEFFICIENT_SEQUENCE,
+                description="上下文发生变化，需要重新评估计划",
+                frequency=1,
+                success_rate=0.0,
+                suggested_optimization="根据新的上下文重新规划",
+            )]
+            return await self._generate_alternative_plan(
+                current_plan, patterns, state, execution_history
+            )
+        
+        # 检测执行模式
+        patterns = self._detect_execution_patterns(execution_history)
+        
+        # 如果没有检测到问题模式，不需要重规划
+        if not patterns:
+            return None
+        
+        # 检查是否有需要触发重规划的模式
+        problem_patterns = [
+            p for p in patterns
+            if p.pattern_type in [
+                PatternType.CIRCULAR_DEPENDENCY,
+                PatternType.REPEATED_FAILURE,
+            ]
+        ]
+        
+        if not problem_patterns:
+            return None
+        
+        # 生成替代计划
+        return await self._generate_alternative_plan(
+            current_plan, problem_patterns, state, execution_history
+        )
+
+    def _validate_parameters(
+        self,
+        arguments: Dict[str, Any],
+        tool: Any,
+    ) -> Tuple[bool, List[str]]:
+        """
+        根据工具定义的 parameter_validators 验证参数
+        
+        支持的验证类型：
+        - regex: 正则表达式匹配
+        - range: 数值范围检查（格式: "min,max"）
+        - enum: 枚举值检查（格式: "value1,value2,value3"）
+        - custom: 自定义验证（调用工具定义的验证函数）
+        
+        Args:
+            arguments: 要验证的参数字典
+            tool: 工具实例
+            
+        Returns:
+            (is_valid, error_messages): 验证是否通过，以及错误消息列表
+            
+        Requirements: 5.1
+        """
+        import re
+        
+        if not tool or not hasattr(tool, "definition"):
+            return True, []
+        
+        tool_def = tool.definition
+        validators = tool_def.parameter_validators if tool_def.parameter_validators else []
+        
+        if not validators:
+            return True, []
+        
+        errors: List[str] = []
+        
+        for validator in validators:
+            param_name = validator.parameter_name
+            validation_type = validator.validation_type
+            validation_rule = validator.validation_rule
+            error_message = validator.error_message
+            
+            # 如果参数不存在，跳过验证（必需参数检查由其他逻辑处理）
+            if param_name not in arguments:
+                continue
+            
+            param_value = arguments[param_name]
+            
+            # 如果参数值为 None，跳过验证
+            if param_value is None:
+                continue
+            
+            is_valid = True
+            
+            if validation_type == "regex":
+                # 正则表达式验证
+                try:
+                    if not isinstance(param_value, str):
+                        param_value = str(param_value)
+                    if not re.match(validation_rule, param_value):
+                        is_valid = False
+                except re.error:
+                    # 正则表达式无效，跳过验证
+                    continue
+                    
+            elif validation_type == "range":
+                # 数值范围验证（格式: "min,max"）
+                try:
+                    parts = validation_rule.split(",")
+                    if len(parts) == 2:
+                        min_val = float(parts[0].strip()) if parts[0].strip() else float("-inf")
+                        max_val = float(parts[1].strip()) if parts[1].strip() else float("inf")
+                        
+                        # 尝试将参数值转换为数值
+                        num_value = float(param_value)
+                        
+                        if num_value < min_val or num_value > max_val:
+                            is_valid = False
+                except (ValueError, TypeError):
+                    # 无法转换为数值，验证失败
+                    is_valid = False
+                    
+            elif validation_type == "enum":
+                # 枚举值验证（格式: "value1,value2,value3"）
+                allowed_values = [v.strip() for v in validation_rule.split(",")]
+                str_value = str(param_value)
+                if str_value not in allowed_values:
+                    is_valid = False
+                    
+            elif validation_type == "custom":
+                # 自定义验证（调用工具定义的验证函数）
+                # validation_rule 是验证函数的名称
+                if hasattr(tool_def, "validate_function") and tool_def.validate_function:
+                    try:
+                        # 自定义验证函数签名: (param_name, param_value, arguments) -> bool
+                        validate_fn = tool_def.validate_function
+                        if callable(validate_fn):
+                            result = validate_fn(param_name, param_value, arguments)
+                            if asyncio.iscoroutine(result):
+                                # 如果是协程，这里不能直接 await，标记为需要异步验证
+                                # 在同步上下文中，我们跳过异步验证
+                                continue
+                            is_valid = bool(result)
+                    except Exception:
+                        # 验证函数执行失败，跳过
+                        continue
+            
+            if not is_valid:
+                errors.append(f"参数 '{param_name}' 验证失败: {error_message}")
+        
+        return len(errors) == 0, errors
 
     def _update_state_from_result(
         self,

@@ -131,6 +131,79 @@ class FailAction:
     reason: Optional[str] = None
 
 
+# ==================== 错误恢复配置 ====================
+
+
+@dataclass
+class ErrorRecoveryStrategy:
+    """
+    错误恢复策略配置
+    
+    用于定义工具执行失败时的恢复策略
+    
+    Attributes:
+        error_pattern: 错误匹配模式（正则表达式）
+        recovery_action: 恢复动作类型
+            - "retry_with_fix": 修正参数后重试
+            - "use_alternative": 使用替代工具
+            - "skip": 跳过当前步骤
+            - "abort": 中止执行
+        fix_suggestion: 修正建议（供 LLM 参考）
+        max_attempts: 最大尝试次数
+    """
+    
+    error_pattern: str  # 错误匹配模式（正则表达式）
+    recovery_action: str  # 恢复动作: "retry_with_fix", "use_alternative", "skip", "abort"
+    fix_suggestion: Optional[str] = None  # 修正建议（供 LLM 参考）
+    max_attempts: int = 3
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "error_pattern": self.error_pattern,
+            "recovery_action": self.recovery_action,
+            "fix_suggestion": self.fix_suggestion,
+            "max_attempts": self.max_attempts,
+        }
+
+
+@dataclass
+class ParameterValidator:
+    """
+    参数验证器
+    
+    用于在工具执行前验证参数有效性
+    
+    Attributes:
+        parameter_name: 要验证的参数名称
+        validation_type: 验证类型
+            - "regex": 正则表达式匹配
+            - "range": 数值范围检查
+            - "enum": 枚举值检查
+            - "custom": 自定义验证
+        validation_rule: 验证规则
+            - regex: 正则表达式字符串
+            - range: "min,max" 格式的范围
+            - enum: 逗号分隔的有效值列表
+            - custom: 自定义验证函数名
+        error_message: 验证失败时的错误消息
+    """
+    
+    parameter_name: str
+    validation_type: str  # "regex", "range", "enum", "custom"
+    validation_rule: str
+    error_message: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "parameter_name": self.parameter_name,
+            "validation_type": self.validation_type,
+            "validation_rule": self.validation_rule,
+            "error_message": self.error_message,
+        }
+
+
 # ==================== 工具定义增强 ====================
 
 
@@ -187,9 +260,20 @@ class ToolDefinition:
     # 是否启用动态 prompt 生成（让 LLM 根据上下文自动生成 prompt）
     dynamic_prompt: bool = False
 
+    # === 错误恢复配置（新增） ===
+    
+    # 错误恢复策略列表：定义不同错误类型的恢复策略
+    error_recovery_strategies: List["ErrorRecoveryStrategy"] = field(default_factory=list)
+    
+    # 替代工具列表：当本工具失败时可尝试的替代方案
+    alternative_tools: List[str] = field(default_factory=list)
+    
+    # 参数验证器列表：在执行前验证参数有效性
+    parameter_validators: List["ParameterValidator"] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "parameters": [
@@ -209,6 +293,22 @@ class ToolDefinition:
             "examples": self.examples,
             "output_schema": self.output_schema,
         }
+        
+        # 添加错误恢复配置（仅当有配置时）
+        if self.error_recovery_strategies:
+            result["error_recovery_strategies"] = [
+                s.to_dict() for s in self.error_recovery_strategies
+            ]
+        
+        if self.alternative_tools:
+            result["alternative_tools"] = self.alternative_tools
+        
+        if self.parameter_validators:
+            result["parameter_validators"] = [
+                v.to_dict() for v in self.parameter_validators
+            ]
+        
+        return result
 
     def to_openai_schema(self) -> Dict[str, Any]:
         """转换为 OpenAI function calling 格式"""

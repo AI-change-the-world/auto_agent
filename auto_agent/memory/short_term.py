@@ -1,30 +1,68 @@
 """
-短期记忆（Short-term Memory）
+短期记忆（Short-term Memory）（部分弃用）
 
 核心功能：
-- 对话历史管理
-- 工作记忆（执行状态）
-- 智能压缩（summarize_state）
+- 对话历史管理（已弃用，请使用 WorkingMemory）
+- 工作记忆（执行状态）（已弃用，请使用 WorkingMemory）
+- 智能压缩（summarize_state）（仍然可用）
 - 工具依赖关系感知
+
+.. deprecated::
+    对话历史和工作记忆功能已弃用，请使用新的 L1 短时记忆：
+    - auto_agent.memory.working.WorkingMemory
+    
+    但 summarize_state() 方法仍然可用，用于压缩执行状态。
 """
 
 import json
 import time
 import uuid
+import warnings
+from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
 from auto_agent.memory.models import ConversationMemory, WorkingMemoryData as WorkingMemory
 from auto_agent.models import Message
 
 
+def _deprecated_class_partial(cls):
+    """部分弃用的类装饰器"""
+    original_init = cls.__init__
+    
+    @wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        warnings.warn(
+            f"{cls.__name__} 的对话历史和工作记忆功能已弃用，请使用 WorkingMemory 替代。"
+            f"但 summarize_state() 方法仍然可用。"
+            f"参见 auto_agent.memory.working.WorkingMemory",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        original_init(self, *args, **kwargs)
+    
+    cls.__init__ = new_init
+    return cls
+
+
+@_deprecated_class_partial
 class ShortTermMemory:
     """
-    短期记忆
+    短期记忆（部分弃用）
+
+    .. deprecated::
+        对话历史和工作记忆功能已弃用，请使用 WorkingMemory 替代。
+        
+        迁移指南：
+        - ShortTermMemory.create_conversation() -> WorkingMemory.start_task()
+        - ShortTermMemory.add_message() -> WorkingMemory.add_tool_call()
+        - ShortTermMemory.get_working_memory() -> MemorySystem.get_working_memory()
+        
+        注意：summarize_state() 方法仍然可用，用于压缩执行状态。
 
     支持：
-    - 对话历史管理
-    - 执行状态（state dict）
-    - 智能压缩（避免传递大量文本给 LLM）
+    - 对话历史管理（已弃用）
+    - 执行状态（state dict）（已弃用）
+    - 智能压缩（避免传递大量文本给 LLM）（仍然可用）
     """
 
     def __init__(

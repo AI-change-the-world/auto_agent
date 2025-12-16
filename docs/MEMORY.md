@@ -236,12 +236,223 @@ Markdown 特点：
 
 ---
 
-## 八、可扩展与演进方向
+## 八、错误恢复记忆集成
+
+### 8.1 错误恢复策略记忆化
+
+智能重试系统与记忆系统深度集成，将成功的错误恢复策略记录到 L2 语义记忆中，实现从失败中学习。
+
+错误恢复策略作为 `SemanticMemoryItem` 存储，遵循现有的记忆系统架构：
+
+**存储结构：**
+
+```
+{storage_path}/
+└── {user_id}/
+    ├── memory.json                           # 索引文件（包含错误恢复策略的元数据）
+    └── reflections/
+        └── mem_20251216_abc12345.md          # 错误恢复策略的详细内容
+```
+
+**JSON 索引层（memory.json 中的一条记录）：**
+
+```json
+{
+  "memory_id": "mem_20251216_abc12345",
+  "layer": "L2",
+  "category": "strategy",
+  "subcategory": "error_recovery",
+  "tags": ["error_recovery", "tool:search_documents", "error:ValueError"],
+  "content": "工具 search_documents 遇到 ValueError 错误时，通过修正 query 成功恢复",
+  "confidence": 0.7,
+  "reward": 0.0,
+  "source": "task_result",
+  "created_at": 1734345600,
+  "updated_at": 1734345600,
+  "access_count": 0,
+  "summary_md_ref": "reflections/mem_20251216_abc12345.md",
+  "metadata": {
+    "category": "error_recovery",
+    "error_type": "ValueError",
+    "tool_name": "search_documents",
+    "fix_pattern": {
+      "original": {"query": ""},
+      "fixed": {"query": "用户输入的搜索词"}
+    },
+    "success": true
+  },
+  "needs_revision": false
+}
+```
+
+**Markdown 内容层（reflections/mem_20251216_abc12345.md）：**
+
+```markdown
+---
+memory_id: mem_20251216_abc12345
+category: strategy
+tags: ["error_recovery", "tool:search_documents", "error:ValueError"]
+created_at: 2025-12-16 10:00:00
+---
+
+# 错误恢复策略: search_documents
+
+## 错误信息
+- **错误类型**: ValueError
+- **错误消息**: 参数 'query' 不能为空
+
+## 原始参数
+\`\`\`json
+{
+  "query": "",
+  "limit": 10
+}
+\`\`\`
+
+## 修正后参数
+\`\`\`json
+{
+  "query": "用户输入的搜索词",
+  "limit": 10
+}
+\`\`\`
+
+## 修正说明
+- \`query\`: \`\` → \`用户输入的搜索词\`
+```
+
+**设计说明：**
+
+- **content**：简短摘要，用于检索和决策（存入 JSON 索引）
+- **detail_content**：详细的 Markdown 内容，供模型理解和人工查看
+- **metadata**：结构化的恢复策略数据，用于后续查询匹配
+- **tags**：包含 `error_recovery`、`tool:{name}`、`error:{type}` 便于精确检索
+
+### 8.2 历史策略优先查询
+
+当工具执行失败时，系统会优先查询记忆中的历史恢复策略：
+
+1. **构建搜索查询**：基于错误类型和工具名称
+2. **匹配分数计算**：
+   - 错误类型匹配：+0.5
+   - 工具名称匹配：+0.3
+   - 错误消息相似度：+0.2
+3. **排序优先级**：匹配分数 > 置信度 > 使用次数
+4. **策略应用**：直接使用历史成功的参数修正方案
+
+**查询流程：**
+
+```
+执行失败
+    │
+    ▼
+┌─────────────────────────┐
+│ 搜索 L2 记忆            │
+│ category: strategy      │
+│ subcategory: error_recovery │
+│ tags: error:{type}, tool:{name} │
+└───────────┬─────────────┘
+            │
+            ▼
+    ┌───────────────┐
+    │ 计算匹配分数  │
+    └───────┬───────┘
+            │
+            ▼
+    ┌───────────────┐
+    │ 有高分匹配？  │
+    └───────┬───────┘
+            │
+      ┌─────┴─────┐
+     是          否
+      │           │
+      ▼           ▼
+  使用历史    LLM 分析
+  策略重试    生成新策略
+```
+
+### 8.3 策略学习闭环
+
+成功的错误恢复会触发策略学习：
+
+1. **记录恢复策略**：将成功的参数修正记录到 L2
+2. **更新置信度**：重复成功使用会提升策略置信度
+3. **反馈驱动**：用户反馈可调整策略权重
+4. **自动清理**：长期未使用的低置信度策略会被清理
+
+**代码示例：**
+
+```python
+from auto_agent.retry import RetryController
+from auto_agent import MemorySystem
+
+memory = MemorySystem(storage_path="./data/memory")
+retry_controller = RetryController(config=config, llm_client=llm)
+
+# 执行失败时，优先查询历史策略
+error_analysis = await retry_controller.analyze_error(
+    exception=e,
+    context={"state": state, "arguments": args},
+    tool_definition=tool.definition,
+    memory_system=memory,  # 启用历史策略查询
+    user_id="user_001",
+)
+
+# 如果有历史策略，error_analysis.reasoning 会包含 "使用历史恢复策略"
+# 如果没有，则使用 LLM 分析
+
+# 成功恢复后，记录策略
+if recovery_successful:
+    await retry_controller.record_successful_recovery(
+        original_error=e,
+        tool_name="search_documents",
+        original_params=original_args,
+        fixed_params=fixed_params,
+        memory_system=memory,
+        user_id="user_001",
+    )
+```
+
+### 8.4 与 L3 叙事记忆的关联
+
+当错误恢复策略积累足够时，可以生成 L3 叙事总结：
+
+```python
+# 生成错误恢复经验总结
+reflection = memory.generate_reflection(
+    user_id="user_001",
+    title="工具执行错误恢复经验",
+    category=MemoryCategory.STRATEGY,
+)
+```
+
+生成的 Markdown 总结示例：
+
+```markdown
+# 工具执行错误恢复经验
+
+## 常见错误模式
+
+1. **参数缺失错误**：通常可以从执行状态中提取正确值
+2. **网络超时错误**：使用指数退避重试通常有效
+3. **权限错误**：需要检查配置，通常不可自动恢复
+
+## 成功策略
+
+- search_documents 工具的 query 参数错误：从 state['inputs']['query'] 获取
+- api_call 工具的超时错误：增加 timeout 参数到 30 秒
+```
+
+---
+
+## 九、可扩展与演进方向
 
 * 记忆冲突检测与合并
 * 时间衰减与自动清理
 * 多 Agent 记忆共享 / 隔离策略
 * 更高级的策略学习（DPO / RL）
+* 跨工具的错误恢复模式学习
+* 基于记忆的预测性错误预防
 
 ---
 
