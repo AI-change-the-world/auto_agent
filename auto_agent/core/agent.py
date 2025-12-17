@@ -222,6 +222,8 @@ class AutoAgent:
         }
 
         final_state = state
+        trace_data = None  # 追踪数据（摘要版）
+        trace_data_full = None  # 追踪数据（完整版）
         async for event in self.executor.execute_plan_stream(
             plan=plan,
             state=state,
@@ -234,6 +236,8 @@ class AutoAgent:
                 yield event
             else:
                 final_state = event["data"]["state"]
+                trace_data = event["data"].get("trace")  # 提取追踪数据（摘要版）
+                trace_data_full = event["data"].get("trace_full")  # 提取追踪数据（完整版）
 
         # Step 4: 生成答案
         final_response = self._aggregate_results(final_state)
@@ -255,6 +259,8 @@ class AutoAgent:
                 "success": True,
                 "message": "Agent执行完成",
                 "iterations": final_state.get("control", {}).get("iterations", 0),
+                "trace": trace_data,  # 传递追踪数据（摘要版）
+                "trace_full": trace_data_full,  # 传递追踪数据（完整版）
             },
         }
 

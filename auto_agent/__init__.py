@@ -53,6 +53,24 @@ from auto_agent.retry.models import RetryConfig, RetryStrategy
 from auto_agent.tools.base import BaseTool
 from auto_agent.tools.registry import ToolRegistry, func_tool, get_global_registry, tool
 
+# 追踪系统
+from auto_agent.tracing import (
+    Tracer,
+    TraceContext,
+    TraceSpan,
+    TraceEvent,
+    LLMCallEvent,
+    ToolCallEvent,
+    FlowEvent,
+    MemoryEvent,
+    get_current_trace,
+    get_current_span,
+    trace_llm_call,
+    trace_tool_call,
+    trace_flow_event,
+    trace_memory_event,
+)
+
 __version__ = "0.1.0"
 
 __all__ = [
@@ -106,4 +124,19 @@ __all__ = [
     # 重试
     "RetryConfig",
     "RetryStrategy",
+    # 追踪
+    "Tracer",
+    "TraceContext",
+    "TraceSpan",
+    "TraceEvent",
+    "LLMCallEvent",
+    "ToolCallEvent",
+    "FlowEvent",
+    "MemoryEvent",
+    "get_current_trace",
+    "get_current_span",
+    "trace_llm_call",
+    "trace_tool_call",
+    "trace_flow_event",
+    "trace_memory_event",
 ]

@@ -65,6 +65,7 @@ class OpenAIClient(LLMClient):
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        trace_purpose: Optional[str] = None,
         **kwargs,
     ) -> str:
         """
@@ -74,11 +75,15 @@ class OpenAIClient(LLMClient):
             messages: 消息列表
             temperature: 温度参数
             max_tokens: 最大 token 数
+            trace_purpose: 追踪目的（用于 tracing 系统）
             **kwargs: 其他参数 (如 top_p, presence_penalty 等)
 
         Returns:
             LLM 响应内容
         """
+        import time
+        start_time = time.time()
+        
         payload = {
             "model": self.model,
             "messages": messages,
@@ -98,7 +103,81 @@ class OpenAIClient(LLMClient):
         )
         response.raise_for_status()
         data = response.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        
+        # 提取 token 使用信息
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = usage.get("total_tokens", 0)
+        
+        # 记录追踪事件
+        duration_ms = (time.time() - start_time) * 1000
+        self._trace_llm_call(
+            purpose=trace_purpose or "other",
+            prompt=self._format_messages_for_trace(messages),
+            response=content,
+            prompt_tokens=prompt_tokens,
+            response_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            temperature=temperature or self.default_temperature,
+            duration_ms=duration_ms,
+        )
+        
+        return content
+    
+    def _format_messages_for_trace(self, messages: List[Dict[str, str]]) -> str:
+        """格式化消息用于追踪"""
+        parts = []
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            parts.append(f"[{role}]: {content}")
+        return "\n".join(parts)
+    
+    def _trace_llm_call(
+        self,
+        purpose: str,
+        prompt: str,
+        response: str,
+        prompt_tokens: int,
+        response_tokens: int,
+        total_tokens: int,
+        temperature: float,
+        duration_ms: float,
+        success: bool = True,
+        error: Optional[str] = None,
+    ):
+        """记录 LLM 调用到追踪系统"""
+        try:
+            from auto_agent.tracing import trace_llm_call
+            trace_llm_call(
+                purpose=purpose,
+                model=self.model,
+                provider=self._get_provider_name(),
+                prompt=prompt,
+                response=response,
+                prompt_tokens=prompt_tokens,
+                response_tokens=response_tokens,
+                total_tokens=total_tokens,
+                temperature=temperature,
+                duration_ms=duration_ms,
+                success=success,
+                error=error,
+            )
+        except Exception:
+            # 追踪失败不影响主流程
+            pass
+    
+    def _get_provider_name(self) -> str:
+        """根据 base_url 推断提供商名称"""
+        if "openai.com" in self.base_url:
+            return "openai"
+        if "deepseek" in self.base_url:
+            return "deepseek"
+        if "azure" in self.base_url:
+            return "azure"
+        return "openai_compatible"
 
     async def stream_chat(
         self,

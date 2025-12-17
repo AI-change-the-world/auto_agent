@@ -7,7 +7,7 @@ name = "auto-agent"
 version = "0.1.0"
 description = "基于 LLM 的自主智能体框架"
 readme = "README.md"
-authors = [{ name = "Your Name", email = "your.email@example.com" }]
+authors = [{ name = "xiaoshuyui", email = "guchengxi1994@qq.com" }]
 license = { text = "MIT" }
 requires-python = ">=3.10"
 classifiers = [
@@ -24,23 +24,23 @@ dependencies = ["pydantic>=2.0", "httpx>=0.25"]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "pytest-cov>=4.0",
-    "black>=23.0",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.3",
+    "pytest-cov>=7.0",
+    "black>=25.12",
     "ruff>=0.14.9",
 ]
 
-storage = ["aiosqlite>=0.19", "redis>=5.0"]
+storage = ["aiosqlite>=0.22.0", "redis>=7.1.0"]
 
-llm = ["openai>=1.0"]
+llm = ["openai>=2.13"]
 
 all = ["auto-agent[dev,storage,llm]"]
 
 [project.urls]
 Homepage = "https://github.com/AI-change-the-world/auto_agent"
 Repository = "https://github.com/AI-change-the-world/auto_agent"
-Documentation = "https://auto-agent.readthedocs.io"
+Documentation = "https://auto-agent.readthedocs.io"              # TODO
 
 [tool.setuptools.packages.find]
 where = ["."]

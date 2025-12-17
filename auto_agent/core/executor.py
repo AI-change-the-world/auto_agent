@@ -177,6 +177,7 @@ class ExecutionEngine:
         conversation_id: str,
         tool_executor: Optional[Callable] = None,
         agent_info: Optional[Dict[str, Any]] = None,
+        enable_tracing: bool = True,
     ):
         """
         流式执行计划（AsyncGenerator）
@@ -185,6 +186,7 @@ class ExecutionEngine:
         - 返回 AsyncGenerator，每个步骤完成后 yield 事件
         - 支持自定义 tool_executor（用于传递上下文，如数据库连接）
         - 内置 ExecutionContext 管理执行上下文
+        - 支持细粒度追踪（enable_tracing=True）
 
         Args:
             plan: 执行计划
@@ -192,13 +194,23 @@ class ExecutionEngine:
             conversation_id: 对话ID
             tool_executor: 自定义工具执行器，签名: async (tool_name, args) -> result
             agent_info: Agent 信息（可选），包含 name, description, goals, constraints
+            enable_tracing: 是否启用追踪（默认 True）
 
         Yields:
             Dict: 事件字典，包含 event 和 data 字段
         """
+        # 初始化追踪上下文
+        from auto_agent.tracing import Tracer, start_span, trace_flow_event
+        
         # 初始化 ExecutionContext（整合 Memory 系统）
         query = state.get("inputs", {}).get("query", "")
         user_id = agent_info.get("user_id", "default") if agent_info else "default"
+        
+        # 开始追踪
+        tracer_ctx = None
+        if enable_tracing:
+            tracer_ctx = Tracer.start(query=query, user_id=user_id)
+            tracer_ctx.__enter__()
         plan_summary = "\n".join(
             f"{i + 1}. {s.description}" for i, s in enumerate(plan.subtasks)
         )
@@ -246,6 +258,17 @@ class ExecutionEngine:
             }
 
             try:
+                # 开始步骤追踪 span
+                step_span = None
+                if enable_tracing:
+                    step_span = start_span(
+                        f"step_{step_num}",
+                        span_type="step",
+                        tool=subtask.tool,
+                        description=subtask.description,
+                    )
+                    step_span.__enter__()
+                
                 # 执行步骤
                 if tool_executor:
                     # 使用自定义执行器
@@ -272,6 +295,10 @@ class ExecutionEngine:
                     )
 
                 results.append(result)
+                
+                # 结束步骤追踪 span
+                if step_span:
+                    step_span.__exit__(None, None, None)
 
                 # 更新状态
                 if result.success:
@@ -309,6 +336,13 @@ class ExecutionEngine:
                     action = await self._handle_failure(subtask, result, state, plan)
 
                     if action.type == "retry":
+                        # 记录重试事件到追踪
+                        if enable_tracing:
+                            trace_flow_event(
+                                action="retry",
+                                reason=result.error or "执行失败",
+                                from_step=subtask.id,
+                            )
                         yield {
                             "event": "stage_retry",
                             "data": {
@@ -323,6 +357,14 @@ class ExecutionEngine:
                             if s.id == action.target_step:
                                 current_step_index = i
                                 break
+                        # 记录跳转事件到追踪
+                        if enable_tracing:
+                            trace_flow_event(
+                                action="jump",
+                                reason=action.reason or "失败策略跳转",
+                                from_step=subtask.id,
+                                to_step=action.target_step,
+                            )
                         yield {
                             "event": "stage_jump",
                             "data": {
@@ -333,6 +375,13 @@ class ExecutionEngine:
                         }
                         continue
                     elif action.type == "abort":
+                        # 记录中止事件到追踪
+                        if enable_tracing:
+                            trace_flow_event(
+                                action="abort",
+                                reason=action.reason or "执行中止",
+                                from_step=subtask.id,
+                            )
                         yield {
                             "event": "stage_abort",
                             "data": {
@@ -399,6 +448,15 @@ class ExecutionEngine:
         if self.context:
             self.context.end_task(promote_to_long_term=False)
 
+        # 结束追踪并获取追踪数据
+        trace_data = None
+        trace_data_full = None  # 完整版（不截断）
+        if enable_tracing and tracer_ctx:
+            tracer_ctx.__exit__(None, None, None)
+            if tracer_ctx.trace:
+                trace_data = tracer_ctx.trace.to_dict(truncate=True)  # 摘要版
+                trace_data_full = tracer_ctx.trace.to_dict(truncate=False)  # 完整版
+
         # 返回最终结果
         yield {
             "event": "execution_complete",
@@ -410,6 +468,8 @@ class ExecutionEngine:
                 "iterations": iterations,
                 "state": state,
                 "context": self.context,  # 返回完整的执行上下文
+                "trace": trace_data,  # 返回追踪数据（摘要版）
+                "trace_full": trace_data_full,  # 返回追踪数据（完整版）
             },
         }
 
@@ -988,6 +1048,8 @@ class ExecutionEngine:
 
         Requirements: 5.1, 5.4
         """
+        from auto_agent.tracing import start_span
+        
         arguments = {}
 
         # 1. 处理 pinned_parameters（固定参数，最高优先级）
@@ -1011,15 +1073,26 @@ class ExecutionEngine:
 
         # 4. 使用 LLM 智能构造参数（核心改进）
         if self.llm_client and tool:
-            arguments = await self._build_arguments_with_llm_v2(
-                subtask, state, tool, arguments
-            )
+            with start_span(
+                "param_build",
+                span_type="param_build",
+                tool=subtask.tool,
+                existing_args=list(arguments.keys()),
+            ):
+                arguments = await self._build_arguments_with_llm_v2(
+                    subtask, state, tool, arguments
+                )
 
         # 5. 验证参数，验证失败时尝试修正
         if tool:
-            arguments = await self._validate_and_fix_parameters(
-                arguments, tool, state, subtask
-            )
+            with start_span(
+                "param_validate",
+                span_type="validation",
+                tool=subtask.tool,
+            ):
+                arguments = await self._validate_and_fix_parameters(
+                    arguments, tool, state, subtask
+                )
 
         return arguments
 
@@ -1131,6 +1204,7 @@ class ExecutionEngine:
                 response = await self.llm_client.chat(
                     [{"role": "user", "content": prompt}],
                     temperature=0.1,
+                    trace_purpose="param_fix",  # 追踪目的：参数修正
                 )
 
                 # 提取 JSON
@@ -1259,6 +1333,7 @@ class ExecutionEngine:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.1,
+                trace_purpose="param_build",  # 追踪目的：参数构造
             )
 
             # 提取 JSON（支持嵌套对象）
@@ -1532,6 +1607,7 @@ class ExecutionEngine:
             generated_prompt = await self.llm_client.chat(
                 [{"role": "user", "content": meta_prompt}],
                 temperature=0.3,
+                trace_purpose="prompt_gen",  # 追踪目的：Prompt 生成
             )
             return generated_prompt.strip()
         except Exception:
@@ -1735,6 +1811,7 @@ class ExecutionEngine:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,  # 较低温度，更稳定的输出
+                trace_purpose="replan",  # 追踪目的：重规划
             )
 
             # 提取 JSON

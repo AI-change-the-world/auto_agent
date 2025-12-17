@@ -36,6 +36,7 @@ from auto_agent import (
     ToolDefinition,
     ToolParameter,
     ToolRegistry,
+    ExecutionPlan
 )
 
 # ==================== LLM 客户端配置 ====================
@@ -734,15 +735,32 @@ async def export_results(
     state: dict,
     output_dir: Path,
     topic: str,
+    trace_data: Optional[Dict[str, Any]] = None,
+    trace_data_full: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     导出研究结果到 Markdown 和 HTML 文件
 
-    使用项目内置的 ExecutionReportGenerator
+    使用项目内置的 ExecutionReportGenerator，整合追踪数据
+    
+    Args:
+        report: 最终研究报告内容
+        execution_log: 执行日志
+        plan: 执行计划
+        results: 执行结果列表
+        state: 最终状态
+        output_dir: 输出目录
+        topic: 研究主题
+        trace_data: 追踪数据（摘要版，用于概览）
+        trace_data_full: 追踪数据（完整版，用于详细报告）
     """
     from datetime import datetime
 
     from auto_agent import ExecutionReportGenerator
+
+    print("[trace_data] tracing data is None?  ", trace_data is None)
+    if trace_data:
+        print(f"tracing data summary: trace_id={trace_data.get('trace_id')}")
 
     # 创建输出目录
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -750,20 +768,30 @@ async def export_results(
     # 生成时间戳
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # 1. 使用 ExecutionReportGenerator 生成报告数据
+    # 1. 使用 ExecutionReportGenerator 生成报告数据（整合追踪数据）
     report_data = ExecutionReportGenerator.generate_report_data(
         agent_name="Deep Research Agent",
         query=topic,
         plan=plan,
         results=results,
         state=state,
+        trace_data=trace_data,  # 传入追踪数据（摘要版）
     )
 
     # 2. 导出 Markdown 报告（包含执行过程 + 最终研究报告）
     md_filename = output_dir / f"research_report_{timestamp}.md"
 
-    # 生成执行过程报告
+    # 生成执行过程报告（包含 LLM 统计和流程事件）
     execution_report = ExecutionReportGenerator.generate_markdown_report(report_data)
+    
+    # 生成详细追踪报告（使用完整版追踪数据，不截断）
+    detailed_trace_report = ""
+    if trace_data_full:
+        detailed_trace_report = ExecutionReportGenerator.generate_detailed_markdown_report(
+            report_data,
+            trace_data=trace_data_full,  # 使用完整版
+            show_full_content=True,  # 显示完整内容
+        )
 
     # 组合完整报告
     md_content = f"""# 研究报告: {topic}
@@ -784,33 +812,84 @@ async def export_results(
     md_filename.write_text(md_content, encoding="utf-8")
     print(f"\n📄 Markdown 报告已保存: {md_filename}")
 
-    # 3. 导出 HTML 报告
+    # 3. 导出详细追踪报告（使用完整版追踪数据，不截断）
+    # 优先使用 trace_data_full（完整版），否则使用 trace_data（摘要版）
+    full_trace = trace_data_full or trace_data
+    if full_trace:
+        detailed_md_filename = output_dir / f"research_report_detailed_{timestamp}.md"
+        detailed_report = ExecutionReportGenerator.generate_detailed_markdown_report(
+            report_data,
+            trace_data=full_trace,
+            show_full_content=True,  # 显示完整的 prompt/response
+        )
+        
+        detailed_content = f"""# 研究报告（详细版）: {topic}
+
+> 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+> 追踪ID: {full_trace.get('trace_id', 'N/A')}
+> 说明: 此报告包含完整的 LLM 调用记录（prompt 和 response 不截断）
+
+---
+
+{report}
+
+---
+
+{detailed_report}
+"""
+        detailed_md_filename.write_text(detailed_content, encoding="utf-8")
+        print(f"📋 详细追踪报告已保存: {detailed_md_filename}")
+
+    # 4. 导出 HTML 报告
     html_filename = output_dir / f"research_report_{timestamp}.html"
 
     html_content = generate_html_report(
         topic=topic,
         research_report=report,
         report_data=report_data,
+        trace_data=trace_data,
     )
 
     html_filename.write_text(html_content, encoding="utf-8")
     print(f"🌐 HTML 报告已保存: {html_filename}")
 
-    # 4. 显示统计信息
+    # 5. 显示统计信息
     stats = report_data.get("statistics", {})
     print("\n📊 执行统计:")
     print(f"   - 总步骤: {stats.get('total_steps', 0)}")
     print(f"   - 成功: {stats.get('successful_steps', 0)}")
     print(f"   - 失败: {stats.get('failed_steps', 0)}")
     print(f"   - 成功率: {stats.get('success_rate', 0)}%")
+    
+    # 6. 显示追踪统计（如果有）
+    trace_summary = report_data.get("trace", {})
+    if trace_summary:
+        llm_usage = trace_summary.get("llm_usage", {})
+        flow_events = trace_summary.get("flow_events", {})
+        
+        print("\n🔍 追踪统计:")
+        print(f"   - 追踪ID: {trace_summary.get('trace_id', 'N/A')}")
+        print(f"   - 总耗时: {trace_summary.get('duration_ms', 0):.1f}ms")
+        print(f"   - LLM调用: {llm_usage.get('total_calls', 0)} 次")
+        print(f"   - Token消耗: {llm_usage.get('total_tokens', 0):,}")
+        
+        if any(flow_events.values()):
+            print(f"   - 重试: {flow_events.get('retries', 0)} 次")
+            print(f"   - 跳转: {flow_events.get('jumps', 0)} 次")
+            print(f"   - 重规划: {flow_events.get('replans', 0)} 次")
 
-    # 5. 显示 Mermaid 流程图
+    # 7. 显示 Mermaid 流程图
     print("\n📈 执行流程图:")
     print(report_data.get("mermaid_diagram", ""))
 
 
-def generate_html_report(topic: str, research_report: str, report_data: dict) -> str:
-    """生成 HTML 格式报告"""
+def generate_html_report(
+    topic: str,
+    research_report: str,
+    report_data: dict,
+    trace_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """生成 HTML 格式报告（整合追踪数据）"""
     import re
     from datetime import datetime
 
@@ -839,6 +918,7 @@ def generate_html_report(topic: str, research_report: str, report_data: dict) ->
     html_report = md_to_html(research_report)
     stats = report_data.get("statistics", {})
     steps = report_data.get("steps", [])
+    trace_summary = report_data.get("trace", {})
 
     # 生成步骤详情 HTML
     steps_html = ""
@@ -942,6 +1022,8 @@ def generate_html_report(topic: str, research_report: str, report_data: dict) ->
             </div>
         </div>
         
+        {_generate_trace_html(trace_summary)}
+        
         <h2>📖 研究内容</h2>
         <div class="report-content">
             {html_report}
@@ -954,6 +1036,84 @@ def generate_html_report(topic: str, research_report: str, report_data: dict) ->
 </body>
 </html>
 """
+
+
+def _generate_trace_html(trace_summary: dict) -> str:
+    """生成追踪统计的 HTML 部分"""
+    if not trace_summary:
+        return ""
+    
+    llm_usage = trace_summary.get("llm_usage", {})
+    flow_events = trace_summary.get("flow_events", {})
+    
+    # LLM 使用统计
+    llm_html = ""
+    if llm_usage.get("total_calls", 0) > 0:
+        by_purpose = llm_usage.get("by_purpose", {})
+        purpose_rows = ""
+        purpose_names = {
+            "planning": "任务规划",
+            "param_build": "参数构造",
+            "validation": "期望验证",
+            "error_analysis": "错误分析",
+            "param_fix": "参数修正",
+            "memory_query": "记忆查询",
+            "other": "其他",
+        }
+        for purpose, data in by_purpose.items():
+            name = purpose_names.get(purpose, purpose)
+            purpose_rows += f"<tr><td>{name}</td><td>{data.get('count', 0)}</td><td>{data.get('tokens', 0):,}</td></tr>"
+        
+        llm_html = f"""
+        <h2>🤖 LLM 调用统计</h2>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">{llm_usage.get('total_calls', 0)}</div>
+                <div class="stat-label">总调用次数</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{llm_usage.get('total_tokens', 0):,}</div>
+                <div class="stat-label">总 Token 数</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{llm_usage.get('prompt_tokens', 0):,}</div>
+                <div class="stat-label">Prompt Tokens</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{llm_usage.get('response_tokens', 0):,}</div>
+                <div class="stat-label">Response Tokens</div>
+            </div>
+        </div>
+        {"<table style='width:100%; margin-top:15px; border-collapse:collapse;'><tr style='background:#f7fafc;'><th style='padding:10px; text-align:left;'>调用目的</th><th style='padding:10px;'>次数</th><th style='padding:10px;'>Tokens</th></tr>" + purpose_rows + "</table>" if purpose_rows else ""}
+        """
+    
+    # 流程事件统计
+    flow_html = ""
+    total_flow = sum(flow_events.values()) if flow_events else 0
+    if total_flow > 0:
+        flow_html = f"""
+        <h2>🔄 流程控制事件</h2>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">{flow_events.get('retries', 0)}</div>
+                <div class="stat-label">重试</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{flow_events.get('jumps', 0)}</div>
+                <div class="stat-label">跳转</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{flow_events.get('aborts', 0)}</div>
+                <div class="stat-label">中止</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{flow_events.get('replans', 0)}</div>
+                <div class="stat-label">重规划</div>
+            </div>
+        </div>
+        """
+    
+    return llm_html + flow_html
 
 
 # ==================== 主程序 ====================
@@ -1049,6 +1209,7 @@ async def main():
     collected_plan = None  # 执行计划
     collected_results = []  # 执行结果
     collected_state = {}  # 最终状态
+    collected_trace = None  # 追踪数据
 
     # 6. 流式执行（观察规划和执行过程）
     try:
@@ -1237,8 +1398,30 @@ async def main():
                 print("\n" + "=" * 70)
                 execution_success = data.get("success", False)
                 iterations = data.get("iterations", 0)
+                # 收集追踪数据（摘要版和完整版）
+                collected_trace = data.get("trace")
+                collected_trace_full = data.get("trace_full")  # 完整版用于详细报告
                 if execution_success:
                     print(f"✅ 研究完成! (执行了 {iterations} 步)")
+                    if collected_trace:
+                        trace_summary = collected_trace.get("summary", {})
+                        llm_calls = trace_summary.get("llm_calls", {})
+                        print(f"   🔍 追踪ID: {collected_trace.get('trace_id', 'N/A')}")
+                        print(f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}")
+                        # 显示按目的分类的统计
+                        by_purpose = llm_calls.get("by_purpose", {})
+                        if by_purpose:
+                            print("   📊 按目的分类:")
+                            purpose_names = {
+                                "param_build": "参数构造",
+                                "param_fix": "参数修正",
+                                "prompt_gen": "Prompt生成",
+                                "replan": "重规划",
+                                "other": "其他",
+                            }
+                            for purpose, stats in by_purpose.items():
+                                name = purpose_names.get(purpose, purpose)
+                                print(f"      - {name}: {stats.get('count', 0)} 次, {stats.get('tokens', 0):,} tokens")
                 else:
                     print(f"❌ 执行失败: {data.get('message', '')}")
                 print("=" * 70)
@@ -1270,6 +1453,8 @@ async def main():
                 },
                 output_dir=script_dir / "output",
                 topic="人工智能在医疗领域的应用与伦理挑战",
+                trace_data=collected_trace,  # 追踪数据（摘要版）
+                trace_data_full=collected_trace_full,  # 追踪数据（完整版，用于详细报告）
             )
 
     except Exception as e:
