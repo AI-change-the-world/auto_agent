@@ -11,21 +11,16 @@
 import asyncio
 import json
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from dataclasses import dataclass, field
 
 from auto_agent import (
-    AgentMarkdownParser,
-    BaseTool,
-    ToolDefinition,
-    ToolParameter,
     ToolRegistry,
     func_tool,
     get_global_registry,
 )
 from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
-
 
 # ============================================================
 # Agent Markdown 定义 (来自 writer_agent_v3.md)
@@ -60,9 +55,11 @@ AGENT_MARKDOWN = """
 # 步骤回调管理器
 # ============================================================
 
+
 @dataclass
 class StepRecord:
     """步骤记录"""
+
     step_id: str
     tool_name: str
     description: str
@@ -76,26 +73,28 @@ class StepRecord:
 
 class ExecutionCallback:
     """执行回调管理器"""
-    
+
     def __init__(self):
         self.steps: List[StepRecord] = []
         self.start_time = time.time()
-    
+
     def on_step_start(self, step_id: str, tool_name: str, description: str):
         """步骤开始"""
-        print(f"\n{'─'*50}")
+        print(f"\n{'─' * 50}")
         print(f"🔄 步骤 {step_id}: {tool_name}")
         print(f"   📝 {description}")
-        print(f"{'─'*50}")
-        
-        self.steps.append(StepRecord(
-            step_id=step_id,
-            tool_name=tool_name,
-            description=description,
-            status="running",
-            start_time=time.time(),
-        ))
-    
+        print(f"{'─' * 50}")
+
+        self.steps.append(
+            StepRecord(
+                step_id=step_id,
+                tool_name=tool_name,
+                description=description,
+                status="running",
+                start_time=time.time(),
+            )
+        )
+
     def on_step_complete(self, step_id: str, result: Dict[str, Any]):
         """步骤完成"""
         for step in self.steps:
@@ -104,14 +103,14 @@ class ExecutionCallback:
                 step.end_time = time.time()
                 step.duration = step.end_time - step.start_time
                 step.result = result
-                
+
                 icon = "✅" if result.get("success") else "❌"
                 print(f"{icon} 完成 ({step.duration:.2f}s)")
-                
+
                 # 显示关键结果
                 self._print_result_summary(result)
                 break
-    
+
     def on_step_error(self, step_id: str, error: str):
         """步骤错误"""
         for step in self.steps:
@@ -121,7 +120,7 @@ class ExecutionCallback:
                 step.end_time = time.time()
                 print(f"❌ 错误: {error}")
                 break
-    
+
     def _print_result_summary(self, result: Dict[str, Any]):
         """打印结果摘要"""
         if "case_types" in result:
@@ -142,6 +141,7 @@ callback = ExecutionCallback()
 # 定义工具
 # ============================================================
 
+
 @func_tool(
     name="classify_case",
     description="根据案件内容判断案件类型（公车私用、非法侵占、职务犯罪等）",
@@ -150,12 +150,12 @@ callback = ExecutionCallback()
 async def classify_case(case_content: str) -> dict:
     """
     分析案件内容，判断案件类型
-    
+
     Args:
         case_content: 案件描述内容
     """
     await asyncio.sleep(0.8)  # 模拟分析时间
-    
+
     # 模拟案件分类逻辑
     case_types = []
     keywords_map = {
@@ -165,15 +165,15 @@ async def classify_case(case_content: str) -> dict:
         "违规收受礼品": ["礼品", "礼金", "红包", "宴请"],
         "违反中央八项规定": ["公款吃喝", "超标准", "违规"],
     }
-    
+
     content_lower = case_content.lower()
     for case_type, keywords in keywords_map.items():
         if any(kw in content_lower for kw in keywords):
             case_types.append(case_type)
-    
+
     if not case_types:
         case_types = ["其他违纪违法行为"]
-    
+
     return {
         "success": True,
         "case_types": case_types,
@@ -194,33 +194,64 @@ async def classify_case(case_content: str) -> dict:
 async def search_guidance_cases(case_type: str, limit: int = 5) -> dict:
     """
     查询指导性案例
-    
+
     Args:
         case_type: 案件类型
         limit: 返回数量限制
     """
     await asyncio.sleep(0.6)
-    
+
     # 模拟指导性案例数据
     guidance_cases = {
         "公车私用": [
-            {"id": "GC2023001", "title": "某局长公车私用案", "key_points": ["认定标准", "处分依据"]},
-            {"id": "GC2023002", "title": "某处长节假日公车私用案", "key_points": ["时间认定", "责任划分"]},
+            {
+                "id": "GC2023001",
+                "title": "某局长公车私用案",
+                "key_points": ["认定标准", "处分依据"],
+            },
+            {
+                "id": "GC2023002",
+                "title": "某处长节假日公车私用案",
+                "key_points": ["时间认定", "责任划分"],
+            },
         ],
         "非法侵占": [
-            {"id": "GC2022015", "title": "某科长侵占公款案", "key_points": ["金额认定", "追缴程序"]},
-            {"id": "GC2022018", "title": "某主任挪用资金案", "key_points": ["挪用与侵占区分", "量刑标准"]},
+            {
+                "id": "GC2022015",
+                "title": "某科长侵占公款案",
+                "key_points": ["金额认定", "追缴程序"],
+            },
+            {
+                "id": "GC2022018",
+                "title": "某主任挪用资金案",
+                "key_points": ["挪用与侵占区分", "量刑标准"],
+            },
         ],
         "职务犯罪": [
-            {"id": "GC2023010", "title": "某副局长受贿案", "key_points": ["受贿认定", "证据收集"]},
-            {"id": "GC2023012", "title": "某处长滥用职权案", "key_points": ["职权范围", "损失认定"]},
+            {
+                "id": "GC2023010",
+                "title": "某副局长受贿案",
+                "key_points": ["受贿认定", "证据收集"],
+            },
+            {
+                "id": "GC2023012",
+                "title": "某处长滥用职权案",
+                "key_points": ["职权范围", "损失认定"],
+            },
         ],
     }
-    
-    cases = guidance_cases.get(case_type, [
-        {"id": "GC2023099", "title": "一般违纪案例", "key_points": ["程序规范", "处分标准"]}
-    ])
-    
+
+    cases = guidance_cases.get(
+        case_type,
+        [
+            {
+                "id": "GC2023099",
+                "title": "一般违纪案例",
+                "key_points": ["程序规范", "处分标准"],
+            }
+        ],
+    )
+
     return {
         "success": True,
         "case_type": case_type,
@@ -242,13 +273,13 @@ async def search_guidance_cases(case_type: str, limit: int = 5) -> dict:
 async def search_research_papers(case_type: str, keywords: str = "") -> dict:
     """
     查询相关论文研究
-    
+
     Args:
         case_type: 案件类型
         keywords: 额外关键词
     """
     await asyncio.sleep(0.5)
-    
+
     # 模拟论文数据
     papers = {
         "公车私用": [
@@ -280,21 +311,24 @@ async def search_research_papers(case_type: str, keywords: str = "") -> dict:
             },
         ],
     }
-    
-    paper_list = papers.get(case_type, [
-        {
-            "title": "纪检监察工作规范化研究",
-            "author": "陈某某",
-            "year": 2023,
-            "insights": ["程序规范", "证据标准"],
-        }
-    ])
-    
+
+    paper_list = papers.get(
+        case_type,
+        [
+            {
+                "title": "纪检监察工作规范化研究",
+                "author": "陈某某",
+                "year": 2023,
+                "insights": ["程序规范", "证据标准"],
+            }
+        ],
+    )
+
     # 提取突破方向
     breakthrough_directions = []
     for paper in paper_list:
         breakthrough_directions.extend(paper.get("insights", []))
-    
+
     return {
         "success": True,
         "case_type": case_type,
@@ -316,50 +350,56 @@ async def generate_memo(
 ) -> dict:
     """
     生成办案备忘录
-    
+
     Args:
         case_types: 案件类型（JSON 格式）
         key_insights: 关键洞察（JSON 格式）
         breakthrough_directions: 突破方向（JSON 格式）
     """
     await asyncio.sleep(0.7)
-    
+
     # 解析输入
     try:
         types = json.loads(case_types) if isinstance(case_types, str) else case_types
     except:
         types = [case_types]
-    
+
     try:
-        insights = json.loads(key_insights) if isinstance(key_insights, str) else key_insights
+        insights = (
+            json.loads(key_insights) if isinstance(key_insights, str) else key_insights
+        )
     except:
         insights = [key_insights]
-    
+
     try:
-        directions = json.loads(breakthrough_directions) if isinstance(breakthrough_directions, str) else breakthrough_directions
+        directions = (
+            json.loads(breakthrough_directions)
+            if isinstance(breakthrough_directions, str)
+            else breakthrough_directions
+        )
     except:
         directions = [breakthrough_directions]
-    
+
     # 生成备忘录
     primary_type = types[0] if types else "未分类案件"
-    
-    memo_content = f"""# 办案备忘录
+
+    memo_content = """# 办案备忘录
 
 ## 一、案件类型判定
 
 本案经初步分析，主要涉及以下违纪违法类型：
 """
-    
+
     for i, t in enumerate(types, 1):
         memo_content += f"\n{i}. **{t}**"
-    
-    memo_content += f"""
+
+    memo_content += """
 
 ## 二、办案注意事项
 
 ### （一）证据收集要点
 """
-    
+
     evidence_points = {
         "公车私用": [
             "调取车辆GPS行驶轨迹记录",
@@ -380,11 +420,11 @@ async def generate_memo(
             "注意证据链完整性",
         ],
     }
-    
+
     points = evidence_points.get(primary_type, ["按规范程序收集证据"])
     for point in points:
         memo_content += f"\n- {point}"
-    
+
     memo_content += """
 
 ### （二）程序规范要求
@@ -396,10 +436,10 @@ async def generate_memo(
 
 ### （三）可能的突破方向
 """
-    
+
     for direction in directions[:5]:
         memo_content += f"\n- {direction}"
-    
+
     memo_content += """
 
 ### （四）风险防控提示
@@ -419,7 +459,7 @@ async def generate_memo(
 ---
 *本备忘录仅供内部参考，请注意保密*
 """
-    
+
     return {
         "success": True,
         "memo_title": f"{primary_type}案件办案备忘录",
@@ -429,112 +469,118 @@ async def generate_memo(
     }
 
 
-
 # ============================================================
 # 执行器
 # ============================================================
 
+
 class CaseAgentExecutor:
     """案件智能体执行器"""
-    
+
     def __init__(self, registry: ToolRegistry, callback: ExecutionCallback):
         self.registry = registry
         self.callback = callback
         self.state: Dict[str, Any] = {}
         self.results: List[SubTaskResult] = []
-    
+
     async def execute(self, plan: ExecutionPlan, case_content: str) -> Dict[str, Any]:
         """执行计划"""
-        print(f"\n{'='*60}")
-        print(f"🚀 开始执行案件分析")
-        print(f"{'='*60}")
+        print(f"\n{'=' * 60}")
+        print("🚀 开始执行案件分析")
+        print(f"{'=' * 60}")
         print(f"📋 案件内容: {case_content[:100]}...")
         print(f"📊 总步骤数: {len(plan.subtasks)}")
-        
+
         self.state["case_content"] = case_content
         start_time = time.time()
-        
+
         for step in plan.subtasks:
             step_id = f"step_{step.id}"
-            
+
             # 回调：步骤开始
             self.callback.on_step_start(step_id, step.tool, step.description)
-            
+
             try:
                 # 获取工具
                 tool = self.registry.get_tool(step.tool)
                 if not tool:
                     raise ValueError(f"工具未找到: {step.tool}")
-                
+
                 # 构建参数
                 args = self._build_arguments(step)
-                
+
                 # 执行工具
                 result = await tool.execute(**args)
-                
+
                 # 保存结果到状态
                 self.state[step.tool] = result
-                
+
                 # 记录结果
-                self.results.append(SubTaskResult(
-                    step_id=str(step.id),
-                    success=result.get("success", False),
-                    output=result,
-                    metadata={"tool": step.tool},
-                ))
-                
+                self.results.append(
+                    SubTaskResult(
+                        step_id=str(step.id),
+                        success=result.get("success", False),
+                        output=result,
+                        metadata={"tool": step.tool},
+                    )
+                )
+
                 # 回调：步骤完成
                 self.callback.on_step_complete(step_id, result)
-                
+
             except Exception as e:
                 error_msg = str(e)
-                self.results.append(SubTaskResult(
-                    step_id=str(step.id),
-                    success=False,
-                    output={},
-                    error=error_msg,
-                    metadata={"tool": step.tool},
-                ))
+                self.results.append(
+                    SubTaskResult(
+                        step_id=str(step.id),
+                        success=False,
+                        output={},
+                        error=error_msg,
+                        metadata={"tool": step.tool},
+                    )
+                )
                 self.callback.on_step_error(step_id, error_msg)
-        
+
         total_time = time.time() - start_time
-        
-        print(f"\n{'='*60}")
+
+        print(f"\n{'=' * 60}")
         print(f"✅ 执行完成! 总耗时: {total_time:.2f}s")
-        print(f"{'='*60}")
-        
+        print(f"{'=' * 60}")
+
         return {
             "success": all(r.success for r in self.results),
             "total_time": total_time,
             "results": self.results,
             "state": self.state,
         }
-    
+
     def _build_arguments(self, step: PlanStep) -> Dict[str, Any]:
         """构建工具参数"""
         args = {}
-        
+
         if step.tool == "classify_case":
             args["case_content"] = self.state.get("case_content", "")
-            
+
         elif step.tool == "search_guidance_cases":
             classify_result = self.state.get("classify_case", {})
             args["case_type"] = classify_result.get("primary_type", "其他")
             args["limit"] = 5
-            
+
         elif step.tool == "search_research_papers":
             classify_result = self.state.get("classify_case", {})
             args["case_type"] = classify_result.get("primary_type", "其他")
-            
+
         elif step.tool == "generate_memo":
             classify_result = self.state.get("classify_case", {})
             guidance_result = self.state.get("search_guidance_cases", {})
             papers_result = self.state.get("search_research_papers", {})
-            
+
             args["case_types"] = json.dumps(classify_result.get("case_types", []))
             args["key_insights"] = json.dumps(guidance_result.get("key_insights", []))
-            args["breakthrough_directions"] = json.dumps(papers_result.get("breakthrough_directions", []))
-        
+            args["breakthrough_directions"] = json.dumps(
+                papers_result.get("breakthrough_directions", [])
+            )
+
         return args
 
 
@@ -542,9 +588,10 @@ class CaseAgentExecutor:
 # 报告生成器
 # ============================================================
 
+
 class CaseReportGenerator:
     """案件报告生成器"""
-    
+
     @staticmethod
     def generate_html(
         agent_name: str,
@@ -554,21 +601,21 @@ class CaseReportGenerator:
         state: Dict[str, Any],
     ) -> str:
         """生成 HTML 报告"""
-        
+
         total_steps = len(results)
         success_steps = sum(1 for r in results if r.success)
         total_time = sum(s.duration for s in callback.steps)
-        
+
         # 获取备忘录内容
         memo_result = state.get("generate_memo", {})
         memo_content = memo_result.get("memo_content", "").replace("\n", "<br>")
-        
+
         # 生成步骤 HTML
         steps_html = ""
         for step in callback.steps:
             status_class = "success" if step.status == "success" else "failed"
             icon = "✅" if step.status == "success" else "❌"
-            steps_html += f'''
+            steps_html += f"""
             <div class="step {status_class}">
                 <div class="step-header">
                     <span class="step-icon">{icon}</span>
@@ -577,19 +624,19 @@ class CaseReportGenerator:
                 </div>
                 <div class="step-desc">{step.description}</div>
             </div>
-            '''
-        
+            """
+
         # 生成 Mermaid 流程图
         mermaid = "graph TD\n    Start([🚀 开始]) --> S1\n"
         for i, step in enumerate(callback.steps):
             icon = "✅" if step.status == "success" else "❌"
-            mermaid += f"    S{i+1}[{icon} {step.tool_name}]\n"
+            mermaid += f"    S{i + 1}[{icon} {step.tool_name}]\n"
             if i < len(callback.steps) - 1:
-                mermaid += f"    S{i+1} --> S{i+2}\n"
+                mermaid += f"    S{i + 1} --> S{i + 2}\n"
             else:
-                mermaid += f"    S{i+1} --> End([🏁 完成])\n"
-        
-        html = f'''<!DOCTYPE html>
+                mermaid += f"    S{i + 1} --> End([🏁 完成])\n"
+
+        html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -723,10 +770,10 @@ class CaseReportGenerator:
     </div>
     <script>mermaid.initialize({{startOnLoad: true, theme: 'default'}});</script>
 </body>
-</html>'''
-        
+</html>"""
+
         return html
-    
+
     @staticmethod
     def generate_markdown(
         agent_name: str,
@@ -736,25 +783,25 @@ class CaseReportGenerator:
         state: Dict[str, Any],
     ) -> str:
         """生成 Markdown 报告"""
-        
+
         total_steps = len(results)
         success_steps = sum(1 for r in results if r.success)
         total_time = sum(s.duration for s in callback.steps)
-        
+
         memo_result = state.get("generate_memo", {})
         memo_content = memo_result.get("memo_content", "")
-        
+
         # Mermaid 流程图
         mermaid = "graph TD\n    Start([🚀 开始]) --> S1\n"
         for i, step in enumerate(callback.steps):
             icon = "✅" if step.status == "success" else "❌"
-            mermaid += f"    S{i+1}[{icon} {step.tool_name}]\n"
+            mermaid += f"    S{i + 1}[{icon} {step.tool_name}]\n"
             if i < len(callback.steps) - 1:
-                mermaid += f"    S{i+1} --> S{i+2}\n"
+                mermaid += f"    S{i + 1} --> S{i + 2}\n"
             else:
-                mermaid += f"    S{i+1} --> End([🏁 完成])\n"
-        
-        md = f'''# 🔍 {agent_name} - 执行报告
+                mermaid += f"    S{i + 1} --> End([🏁 完成])\n"
+
+        md = f"""# 🔍 {agent_name} - 执行报告
 
 > 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
@@ -779,44 +826,44 @@ class CaseReportGenerator:
 
 ## 📝 步骤详情
 
-'''
-        
+"""
+
         for step in callback.steps:
             icon = "✅" if step.status == "success" else "❌"
-            md += f'''### {icon} {step.step_id}: {step.tool_name}
+            md += f"""### {icon} {step.step_id}: {step.tool_name}
 
 - **描述**: {step.description}
 - **状态**: {step.status}
 - **耗时**: {step.duration:.3f}s
 
-'''
-        
-        md += f'''## 📄 生成的办案备忘录
+"""
+
+        md += f"""## 📄 生成的办案备忘录
 
 {memo_content}
-'''
-        
-        return md
+"""
 
+        return md
 
 
 # ============================================================
 # 主函数
 # ============================================================
 
+
 async def main():
     """主函数"""
-    
+
     print("=" * 60)
     print("🔍 纪委案件办理智能体演示")
     print("=" * 60)
-    
+
     # 1. 读取 Agent Markdown（这里直接使用内置定义）
     print("\n📄 步骤 1: 解析 Agent Markdown")
     print("-" * 40)
-    
+
     from auto_agent.core.editor.parser import AgentDefinition
-    
+
     agent_def = AgentDefinition(
         name="纪委案件办理智能体",
         description="侦办纪委相关案件的智能助手",
@@ -833,59 +880,68 @@ async def main():
         ],
         initial_plan=[
             PlanStep(id=1, tool="classify_case", description="根据案件内容判断类型"),
-            PlanStep(id=2, tool="search_guidance_cases", description="查询相关指导性案例"),
-            PlanStep(id=3, tool="search_research_papers", description="查询相关论文研究"),
+            PlanStep(
+                id=2, tool="search_guidance_cases", description="查询相关指导性案例"
+            ),
+            PlanStep(
+                id=3, tool="search_research_papers", description="查询相关论文研究"
+            ),
             PlanStep(id=4, tool="generate_memo", description="生成办案备忘录"),
         ],
     )
-    
+
     print(f"✅ Agent: {agent_def.name}")
     print(f"✅ 目标: {len(agent_def.goals)} 个")
     print(f"✅ 步骤: {len(agent_def.initial_plan)} 个")
-    
+
     # 2. 注册工具
     print("\n🔧 步骤 2: 注册工具")
     print("-" * 40)
-    
+
     registry = get_global_registry()
     tools = registry.get_all_tools()
-    
+
     # 过滤出本演示的工具
-    demo_tools = ["classify_case", "search_guidance_cases", "search_research_papers", "generate_memo"]
+    demo_tools = [
+        "classify_case",
+        "search_guidance_cases",
+        "search_research_papers",
+        "generate_memo",
+    ]
     available = [t.definition.name for t in tools if t.definition.name in demo_tools]
     print(f"✅ 已注册工具: {available}")
-    
+
     # 3. 创建执行计划
     print("\n📋 步骤 3: 创建执行计划")
     print("-" * 40)
-    
+
     plan = ExecutionPlan(
         intent="case_analysis",
         subtasks=agent_def.initial_plan,
         state_schema={},
     )
-    
+
     for step in plan.subtasks:
         print(f"   {step.id}. {step.tool}: {step.description}")
-    
+
     # 4. 模拟案件内容
     case_content = """
     某市交通局副局长张某，在2022年至2023年期间，多次使用公务车辆接送子女上下学，
     并在节假日期间驾驶公车外出旅游。经初步调查，张某还涉嫌收受下属单位负责人礼品礼金，
     金额约5万元。此外，张某在工程招标过程中，涉嫌为特定企业提供便利，收受好处费。
     """
-    
+
     # 5. 执行
     print("\n⚡ 步骤 4: 执行案件分析")
     print("-" * 40)
-    
+
     executor = CaseAgentExecutor(registry, callback)
     result = await executor.execute(plan, case_content.strip())
-    
+
     # 6. 生成报告
     print("\n📊 步骤 5: 生成可视化报告")
     print("-" * 40)
-    
+
     # HTML 报告
     html_report = CaseReportGenerator.generate_html(
         agent_name=agent_def.name,
@@ -894,12 +950,12 @@ async def main():
         results=executor.results,
         state=executor.state,
     )
-    
+
     html_path = "case_report.html"
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html_report)
     print(f"✅ HTML 报告: {html_path}")
-    
+
     # Markdown 报告
     md_report = CaseReportGenerator.generate_markdown(
         agent_name=agent_def.name,
@@ -908,27 +964,27 @@ async def main():
         results=executor.results,
         state=executor.state,
     )
-    
+
     md_path = "case_report.md"
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md_report)
     print(f"✅ Markdown 报告: {md_path}")
-    
+
     # 7. 显示生成的备忘录
     print("\n" + "=" * 60)
     print("📄 生成的办案备忘录")
     print("=" * 60)
-    
+
     memo_result = executor.state.get("generate_memo", {})
     if memo_result.get("memo_content"):
         print(memo_result["memo_content"])
-    
+
     print("\n" + "=" * 60)
     print("✅ 演示完成!")
     print(f"📄 HTML 报告: {html_path}")
     print(f"📄 Markdown 报告: {md_path}")
     print("=" * 60)
-    
+
     return result
 
 

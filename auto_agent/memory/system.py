@@ -4,7 +4,6 @@
 整合 L1/L2/L3 三层记忆，提供统一接口
 """
 
-import time
 from typing import Any, Dict, List, Optional
 
 from auto_agent.memory.models import (
@@ -13,10 +12,10 @@ from auto_agent.memory.models import (
     SemanticMemoryItem,
     UserFeedback,
 )
-from auto_agent.memory.working import WorkingMemory
-from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter
+from auto_agent.memory.semantic import SemanticMemory
+from auto_agent.memory.working import WorkingMemory
 
 
 class MemorySystem:
@@ -80,7 +79,9 @@ class MemorySystem:
             self._working_memories[task_id] = WorkingMemory()
         return self._working_memories[task_id]
 
-    def start_task(self, user_id: str, query: str, task_id: Optional[str] = None) -> str:
+    def start_task(
+        self, user_id: str, query: str, task_id: Optional[str] = None
+    ) -> str:
         """开始新任务"""
         wm = WorkingMemory()
         actual_task_id = wm.start_task(query, task_id)
@@ -124,11 +125,11 @@ class MemorySystem:
 
         # 清理短时记忆
         del self._working_memories[task_id]
-    
+
     def get_task_summary(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         获取任务执行摘要（供外部分析使用）
-        
+
         这个方法返回执行历史的结构化摘要，
         可用于：
         - 生成执行报告
@@ -197,7 +198,9 @@ class MemorySystem:
         """👍 正反馈"""
         return self.add_feedback(user_id, memory_id, 1)
 
-    def thumbs_down(self, user_id: str, memory_id: str, reason: Optional[str] = None) -> Optional[UserFeedback]:
+    def thumbs_down(
+        self, user_id: str, memory_id: str, reason: Optional[str] = None
+    ) -> Optional[UserFeedback]:
         """👎 负反馈"""
         return self.add_feedback(user_id, memory_id, -1, reason)
 
@@ -298,7 +301,9 @@ class MemorySystem:
             ]
         else:
             # 获取该分类的 top 记忆
-            memories = self.semantic.get_top_memories(user_id, limit=10, category=category)
+            memories = self.semantic.get_top_memories(
+                user_id, limit=10, category=category
+            )
 
         if not memories:
             return None
@@ -389,21 +394,27 @@ class MemorySystem:
         lines = []
 
         # 偏好
-        prefs = self.semantic.get_by_category(user_id, MemoryCategory.PREFERENCE, limit=5)
+        prefs = self.semantic.get_by_category(
+            user_id, MemoryCategory.PREFERENCE, limit=5
+        )
         if prefs:
             lines.append("用户偏好:")
             for p in prefs:
                 lines.append(f"  - {p.content}")
 
         # 知识
-        knowledge = self.semantic.get_by_category(user_id, MemoryCategory.KNOWLEDGE, limit=5)
+        knowledge = self.semantic.get_by_category(
+            user_id, MemoryCategory.KNOWLEDGE, limit=5
+        )
         if knowledge:
             lines.append("已知信息:")
             for k in knowledge:
                 lines.append(f"  - {k.content}")
 
         # 策略
-        strategies = self.semantic.get_by_category(user_id, MemoryCategory.STRATEGY, limit=3)
+        strategies = self.semantic.get_by_category(
+            user_id, MemoryCategory.STRATEGY, limit=3
+        )
         if strategies:
             lines.append("经验策略:")
             for s in strategies:

@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 def _deprecated_class(cls):
     """类弃用装饰器"""
     original_init = cls.__init__
-    
+
     @wraps(original_init)
     def new_init(self, *args, **kwargs):
         warnings.warn(
@@ -39,7 +39,7 @@ def _deprecated_class(cls):
             stacklevel=2,
         )
         original_init(self, *args, **kwargs)
-    
+
     cls.__init__ = new_init
     return cls
 
@@ -107,7 +107,7 @@ class CategorizedMemory:
 
     .. deprecated::
         此类已弃用，请使用 MemorySystem 替代。
-        
+
         迁移指南：
         - CategorizedMemory.set_preference() -> MemorySystem.set_preference()
         - CategorizedMemory.add_knowledge() -> MemorySystem.add_knowledge()
@@ -126,7 +126,9 @@ class CategorizedMemory:
         storage_path: Optional[str] = None,
         auto_save: bool = True,
     ):
-        self._memories: Dict[str, Dict[str, MemoryItem]] = {}  # user_id -> {key -> item}
+        self._memories: Dict[
+            str, Dict[str, MemoryItem]
+        ] = {}  # user_id -> {key -> item}
         self._storage_path = Path(storage_path) if storage_path else None
         self._auto_save = auto_save
 
@@ -289,9 +291,7 @@ class CategorizedMemory:
             return 0
 
         expired_keys = [
-            key
-            for key, item in self._memories[user_id].items()
-            if item.is_expired()
+            key for key, item in self._memories[user_id].items() if item.is_expired()
         ]
 
         for key in expired_keys:
@@ -396,8 +396,7 @@ class CategorizedMemory:
 
         file_path = self._get_user_file(user_id)
         data = {
-            key: item.to_dict()
-            for key, item in self._memories.get(user_id, {}).items()
+            key: item.to_dict() for key, item in self._memories.get(user_id, {}).items()
         }
         file_path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
 

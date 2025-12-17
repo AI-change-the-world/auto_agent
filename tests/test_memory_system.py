@@ -9,20 +9,17 @@
 - MemorySystem (统一系统)
 """
 
-import pytest
 import time
+
 from auto_agent.memory import (
-    MemorySystem,
-    WorkingMemory,
-    SemanticMemory,
-    NarrativeMemoryManager,
-    MemoryRouter,
     MemoryCategory,
-    MemorySource,
-    SemanticMemoryItem,
-    WorkingMemoryItem,
-    UserFeedback,
+    MemoryRouter,
+    MemorySystem,
+    NarrativeMemoryManager,
     QueryIntent,
+    SemanticMemory,
+    SemanticMemoryItem,
+    WorkingMemory,
 )
 
 
@@ -196,7 +193,12 @@ class TestSemanticMemory:
         sm = SemanticMemory()
         candidates = [
             {"content": "成功策略1", "category": "strategy", "source": "task_result"},
-            {"content": "失败经验", "category": "strategy", "source": "task_result", "is_negative": True},
+            {
+                "content": "失败经验",
+                "category": "strategy",
+                "source": "task_result",
+                "is_negative": True,
+            },
         ]
 
         created = sm.promote_from_working("user1", candidates)
@@ -290,8 +292,15 @@ class TestMemoryRouter:
 
     def test_route(self):
         sm = SemanticMemory()
-        sm.add("user1", "用户偏好Python", category=MemoryCategory.PREFERENCE, tags=["python"])
-        sm.add("user1", "之前用过FastAPI", category=MemoryCategory.WORK, tags=["fastapi"])
+        sm.add(
+            "user1",
+            "用户偏好Python",
+            category=MemoryCategory.PREFERENCE,
+            tags=["python"],
+        )
+        sm.add(
+            "user1", "之前用过FastAPI", category=MemoryCategory.WORK, tags=["fastapi"]
+        )
 
         router = MemoryRouter(sm)
         result = router.route("user1", "帮我写一个Python API")

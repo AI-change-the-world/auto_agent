@@ -7,7 +7,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
+from auto_agent.models import ExecutionPlan, SubTaskResult
 
 
 class ExecutionReportGenerator:
@@ -43,7 +43,7 @@ class ExecutionReportGenerator:
         steps_detail = []
         for step in plan.subtasks:
             result = result_map.get(step.id)
-            
+
             if result is None:
                 status = "pending"
             elif result.success:
@@ -51,17 +51,19 @@ class ExecutionReportGenerator:
             else:
                 status = "failed"
 
-            steps_detail.append({
-                "step": step.id,
-                "name": step.tool or "unknown",
-                "description": step.description,
-                "expectations": step.expectations,
-                "status": status,
-                "output": ExecutionReportGenerator._compress_output(
-                    result.output if result else None
-                ),
-                "error": result.error if result and not result.success else None,
-            })
+            steps_detail.append(
+                {
+                    "step": step.id,
+                    "name": step.tool or "unknown",
+                    "description": step.description,
+                    "expectations": step.expectations,
+                    "status": status,
+                    "output": ExecutionReportGenerator._compress_output(
+                        result.output if result else None
+                    ),
+                    "error": result.error if result and not result.success else None,
+                }
+            )
 
         # 统计信息
         total_steps = len(plan.subtasks)
@@ -86,9 +88,9 @@ class ExecutionReportGenerator:
                 "executed_steps": executed_steps,
                 "successful_steps": successful_steps,
                 "failed_steps": failed_steps,
-                "success_rate": round(
-                    successful_steps / executed_steps * 100, 1
-                ) if executed_steps > 0 else 0,
+                "success_rate": round(successful_steps / executed_steps * 100, 1)
+                if executed_steps > 0
+                else 0,
             },
             "steps": steps_detail,
             "final_state": ExecutionReportGenerator._compress_state(state),
@@ -105,7 +107,7 @@ class ExecutionReportGenerator:
         """生成 Mermaid 流程图"""
         if not plan.subtasks:
             return "graph TD\n    Start([开始]) --> End([结束])"
-            
+
         result_map = {r.step_id: r for r in results}
         lines = ["graph TD"]
         lines.append("    Start([开始]) --> Step1")
@@ -113,7 +115,7 @@ class ExecutionReportGenerator:
         for i, step in enumerate(plan.subtasks):
             step_id = f"Step{step.id}"
             result = result_map.get(step.id)
-            
+
             tool_name = step.tool or "unknown"
             if result is None:
                 shape = f"[{tool_name}]"
@@ -148,61 +150,61 @@ class ExecutionReportGenerator:
     def generate_markdown_report(report_data: Dict[str, Any]) -> str:
         """生成 Markdown 格式报告"""
         lines = [
-            f"# 智能体执行报告",
-            f"",
+            "# 智能体执行报告",
+            "",
             f"**Agent**: {report_data['agent_name']}",
             f"**意图**: {report_data.get('intent', 'N/A')}",
             f"**执行时间**: {report_data['generated_at']}",
             f"**耗时**: {report_data.get('duration_seconds', 'N/A')} 秒",
-            f"",
-            f"**用户输入**:",
+            "",
+            "**用户输入**:",
             f"> {report_data['query']}",
-            f"",
-            f"---",
-            f"",
-            f"## 执行统计",
-            f"",
-            f"| 指标 | 值 |",
-            f"|------|-----|",
+            "",
+            "---",
+            "",
+            "## 执行统计",
+            "",
+            "| 指标 | 值 |",
+            "|------|-----|",
             f"| 总步骤数 | {report_data['statistics']['total_steps']} |",
             f"| 已执行 | {report_data['statistics']['executed_steps']} |",
             f"| 成功 | {report_data['statistics']['successful_steps']} |",
             f"| 失败 | {report_data['statistics']['failed_steps']} |",
             f"| 成功率 | {report_data['statistics']['success_rate']}% |",
-            f"",
-            f"## 执行流程",
-            f"",
-            f"```mermaid",
-            report_data['mermaid_diagram'],
-            f"```",
-            f"",
-            f"## 步骤详情",
-            f"",
+            "",
+            "## 执行流程",
+            "",
+            "```mermaid",
+            report_data["mermaid_diagram"],
+            "```",
+            "",
+            "## 步骤详情",
+            "",
         ]
 
-        for step in report_data['steps']:
+        for step in report_data["steps"]:
             status_icon = {
                 "success": "✅",
-                "failed": "❌", 
+                "failed": "❌",
                 "pending": "⏳",
-            }.get(step['status'], "❓")
-            
+            }.get(step["status"], "❓")
+
             lines.append(f"### {status_icon} 步骤 {step['step']}: {step['name']}")
-            lines.append(f"")
+            lines.append("")
             lines.append(f"- **描述**: {step['description']}")
-            if step.get('expectations'):
+            if step.get("expectations"):
                 lines.append(f"- **期望**: {step['expectations']}")
             lines.append(f"- **状态**: {step['status']}")
-            if step.get('error'):
+            if step.get("error"):
                 lines.append(f"- **错误**: `{step['error']}`")
-            lines.append(f"")
+            lines.append("")
 
-        if report_data.get('errors'):
-            lines.append(f"## 错误信息")
-            lines.append(f"")
-            for err in report_data['errors']:
+        if report_data.get("errors"):
+            lines.append("## 错误信息")
+            lines.append("")
+            for err in report_data["errors"]:
                 lines.append(f"- {err}")
-            lines.append(f"")
+            lines.append("")
 
         return "\n".join(lines)
 

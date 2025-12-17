@@ -38,7 +38,6 @@ from auto_agent import (
     ToolRegistry,
 )
 
-
 # ==================== LLM 客户端配置 ====================
 
 
@@ -98,7 +97,10 @@ class ReadMaterialsTool(BaseTool):
         try:
             dir_path = Path(self.materials_dir)
             if not dir_path.exists():
-                return {"success": False, "error": f"素材目录不存在: {self.materials_dir}"}
+                return {
+                    "success": False,
+                    "error": f"素材目录不存在: {self.materials_dir}",
+                }
 
             extensions = [ext.strip() for ext in file_types.split(",")]
             materials = []
@@ -111,20 +113,27 @@ class ReadMaterialsTool(BaseTool):
                         # 使用 LLM 生成文件摘要
                         summary = await self._generate_summary(file_path.name, content)
 
-                        materials.append({
-                            "filename": file_path.name,
-                            "content": content,
-                            "summary": summary,
-                            "word_count": len(content),
-                        })
+                        materials.append(
+                            {
+                                "filename": file_path.name,
+                                "content": content,
+                                "summary": summary,
+                                "word_count": len(content),
+                            }
+                        )
                     except Exception as e:
-                        materials.append({
-                            "filename": file_path.name,
-                            "error": str(e),
-                        })
+                        materials.append(
+                            {
+                                "filename": file_path.name,
+                                "error": str(e),
+                            }
+                        )
 
             if not materials:
-                return {"success": False, "error": f"目录中没有找到 {file_types} 格式的文件"}
+                return {
+                    "success": False,
+                    "error": f"目录中没有找到 {file_types} 格式的文件",
+                }
 
             return {
                 "success": True,
@@ -249,7 +258,7 @@ class AnalyzeContentTool(BaseTool):
             )
 
             # 解析 JSON
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
             if json_match:
                 analysis = json.loads(json_match.group())
                 analysis["success"] = True
@@ -273,7 +282,11 @@ class AnalyzeContentTool(BaseTool):
                 return fallback
 
         except json.JSONDecodeError:
-            return {"success": True, "raw_analysis": response, "parse_error": "JSON解析失败"}
+            return {
+                "success": True,
+                "raw_analysis": response,
+                "parse_error": "JSON解析失败",
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -312,7 +325,10 @@ class ReflectTool(BaseTool):
                 "reflection_result": {"type": "object", "description": "完整反思结果"},
                 "reflection_summary": {"type": "string", "description": "反思总结"},
                 "logical_issues": {"type": "array", "description": "逻辑问题"},
-                "confidence_assessment": {"type": "object", "description": "可信度评估"},
+                "confidence_assessment": {
+                    "type": "object",
+                    "description": "可信度评估",
+                },
             },
             # 参数别名：从 state["analysis_result"] 获取 analysis 参数
             param_aliases={
@@ -335,7 +351,8 @@ class ReflectTool(BaseTool):
             }
 
             depth_instruction = depth_instructions.get(
-                depth, depth_instructions["medium"])
+                depth, depth_instructions["medium"]
+            )
             analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)
 
             prompt = f"""请对以下研究分析结果进行批判性反思。
@@ -372,7 +389,7 @@ class ReflectTool(BaseTool):
                 max_tokens=2500,
             )
 
-            json_match = re.search(r'\{.*\}', response, re.DOTALL)
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
             if json_match:
                 reflection = json.loads(json_match.group())
                 reflection["success"] = True
@@ -381,7 +398,9 @@ class ReflectTool(BaseTool):
                     "logical_issues": reflection.get("logical_issues", []),
                     "potential_biases": reflection.get("potential_biases", []),
                     "missing_perspectives": reflection.get("missing_perspectives", []),
-                    "confidence_assessment": reflection.get("confidence_assessment", {}),
+                    "confidence_assessment": reflection.get(
+                        "confidence_assessment", {}
+                    ),
                     "reflection_summary": reflection.get("reflection_summary", ""),
                 }
                 return reflection
@@ -451,7 +470,8 @@ class PolishTextTool(BaseTool):
             }
 
             style_instruction = style_instructions.get(
-                style, style_instructions["professional"])
+                style, style_instructions["professional"]
+            )
 
             prompt = f"""请对以下文本进行语言润色。
 
@@ -549,11 +569,15 @@ class GenerateReportTool(BaseTool):
             }
 
             format_instruction = format_instructions.get(
-                format, format_instructions["standard"])
+                format, format_instructions["standard"]
+            )
 
             analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)
-            reflection_text = json.dumps(
-                reflection, ensure_ascii=False, indent=2) if reflection else "无"
+            reflection_text = (
+                json.dumps(reflection, ensure_ascii=False, indent=2)
+                if reflection
+                else "无"
+            )
 
             prompt = f"""请基于以下分析结果和反思意见，生成一份专业的研究报告。
 
@@ -602,7 +626,8 @@ def create_sample_materials(materials_dir: Path):
     materials_dir.mkdir(parents=True, exist_ok=True)
 
     sample1 = materials_dir / "ai_medical_applications.md"
-    sample1.write_text("""# 人工智能在医疗领域的应用
+    sample1.write_text(
+        """# 人工智能在医疗领域的应用
 
 ## 概述
 人工智能（AI）正在深刻改变医疗行业。从疾病诊断到药物研发，AI技术展现出巨大潜力。
@@ -626,10 +651,13 @@ AI可以加速药物发现过程，通过分析大量化合物数据预测潜在
 
 ## 结论
 AI在医疗领域的应用前景广阔，但需要在技术发展和伦理规范之间找到平衡。
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     sample2 = materials_dir / "ai_ethics_challenges.md"
-    sample2.write_text("""# AI 医疗诊断的伦理挑战
+    sample2.write_text(
+        """# AI 医疗诊断的伦理挑战
 
 ## 引言
 随着人工智能在医疗诊断中的应用日益普及，相关的伦理问题也变得更加突出。
@@ -653,10 +681,13 @@ AI在医疗领域的应用前景广阔，但需要在技术发展和伦理规范
 
 ## 总结
 技术进步不能以牺牲伦理为代价，AI医疗应用需要在创新与伦理之间寻找平衡点。
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     sample3 = materials_dir / "market_data.txt"
-    sample3.write_text("""AI医疗市场数据报告（2024）
+    sample3.write_text(
+        """AI医疗市场数据报告（2024）
 
 市场规模与增长:
 - 2024年全球AI医疗市场规模: 约150亿美元
@@ -685,7 +716,9 @@ AI在医疗领域的应用前景广阔，但需要在技术发展和伦理规范
 - 欧洲: 25%
 - 亚太: 25%
 - 其他: 5%
-""", encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
 
     print(f"✅ 已创建示例素材到 {materials_dir}")
 
@@ -708,6 +741,7 @@ async def export_results(
     使用项目内置的 ExecutionReportGenerator
     """
     from datetime import datetime
+
     from auto_agent import ExecutionReportGenerator
 
     # 创建输出目录
@@ -729,8 +763,7 @@ async def export_results(
     md_filename = output_dir / f"research_report_{timestamp}.md"
 
     # 生成执行过程报告
-    execution_report = ExecutionReportGenerator.generate_markdown_report(
-        report_data)
+    execution_report = ExecutionReportGenerator.generate_markdown_report(report_data)
 
     # 组合完整报告
     md_content = f"""# 研究报告: {topic}
@@ -765,43 +798,43 @@ async def export_results(
 
     # 4. 显示统计信息
     stats = report_data.get("statistics", {})
-    print(f"\n📊 执行统计:")
+    print("\n📊 执行统计:")
     print(f"   - 总步骤: {stats.get('total_steps', 0)}")
     print(f"   - 成功: {stats.get('successful_steps', 0)}")
     print(f"   - 失败: {stats.get('failed_steps', 0)}")
     print(f"   - 成功率: {stats.get('success_rate', 0)}%")
 
     # 5. 显示 Mermaid 流程图
-    print(f"\n📈 执行流程图:")
+    print("\n📈 执行流程图:")
     print(report_data.get("mermaid_diagram", ""))
 
 
 def generate_html_report(topic: str, research_report: str, report_data: dict) -> str:
     """生成 HTML 格式报告"""
-    from datetime import datetime
     import re
+    from datetime import datetime
 
     # 简单的 Markdown 转 HTML
     def md_to_html(md_text: str) -> str:
         html = md_text
         # 标题
-        html = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
-        html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
-        html = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+        html = re.sub(r"^### (.+)$", r"<h3>\1</h3>", html, flags=re.MULTILINE)
+        html = re.sub(r"^## (.+)$", r"<h2>\1</h2>", html, flags=re.MULTILINE)
+        html = re.sub(r"^# (.+)$", r"<h1>\1</h1>", html, flags=re.MULTILINE)
         # 加粗
-        html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+        html = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", html)
         # 列表项
-        html = re.sub(r'^- (.+)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+        html = re.sub(r"^- (.+)$", r"<li>\1</li>", html, flags=re.MULTILINE)
         # 段落
-        lines = html.split('\n')
+        lines = html.split("\n")
         result = []
         for line in lines:
             line = line.strip()
-            if line and not line.startswith('<'):
-                result.append(f'<p>{line}</p>')
+            if line and not line.startswith("<"):
+                result.append(f"<p>{line}</p>")
             else:
                 result.append(line)
-        return '\n'.join(result)
+        return "\n".join(result)
 
     html_report = md_to_html(research_report)
     stats = report_data.get("statistics", {})
@@ -810,16 +843,31 @@ def generate_html_report(topic: str, research_report: str, report_data: dict) ->
     # 生成步骤详情 HTML
     steps_html = ""
     for step in steps:
-        status_class = "success" if step['status'] == 'success' else "error" if step['status'] == 'failed' else "pending"
-        status_icon = "✅" if step['status'] == 'success' else "❌" if step['status'] == 'failed' else "⏳"
-        error_html = f'<p class="error"><strong>错误:</strong> {step["error"]}</p>' if step.get(
-            'error') else ''
+        status_class = (
+            "success"
+            if step["status"] == "success"
+            else "error"
+            if step["status"] == "failed"
+            else "pending"
+        )
+        status_icon = (
+            "✅"
+            if step["status"] == "success"
+            else "❌"
+            if step["status"] == "failed"
+            else "⏳"
+        )
+        error_html = (
+            f'<p class="error"><strong>错误:</strong> {step["error"]}</p>'
+            if step.get("error")
+            else ""
+        )
 
         steps_html += f"""
         <div class="step {status_class}">
-            <h4>{status_icon} Step {step['step']}: {step['name']}</h4>
-            <p><strong>描述:</strong> {step['description']}</p>
-            {f"<p><strong>期望:</strong> {step['expectations']}</p>" if step.get('expectations') else ''}
+            <h4>{status_icon} Step {step["step"]}: {step["name"]}</h4>
+            <p><strong>描述:</strong> {step["description"]}</p>
+            {f"<p><strong>期望:</strong> {step['expectations']}</p>" if step.get("expectations") else ""}
             {error_html}
         </div>
         """
@@ -870,26 +918,26 @@ def generate_html_report(topic: str, research_report: str, report_data: dict) ->
         
         <div class="meta">
             <strong>生成时间:</strong> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}<br>
-            <strong>智能体:</strong> {report_data.get('agent_name', 'Deep Research Agent')}<br>
-            <strong>意图:</strong> {report_data.get('intent', 'N/A')}
+            <strong>智能体:</strong> {report_data.get("agent_name", "Deep Research Agent")}<br>
+            <strong>意图:</strong> {report_data.get("intent", "N/A")}
         </div>
         
         <h2>📊 执行统计</h2>
         <div class="stats">
             <div class="stat">
-                <div class="stat-value">{stats.get('total_steps', 0)}</div>
+                <div class="stat-value">{stats.get("total_steps", 0)}</div>
                 <div class="stat-label">总步骤</div>
             </div>
             <div class="stat">
-                <div class="stat-value" style="color: #48bb78;">{stats.get('successful_steps', 0)}</div>
+                <div class="stat-value" style="color: #48bb78;">{stats.get("successful_steps", 0)}</div>
                 <div class="stat-label">成功</div>
             </div>
             <div class="stat">
-                <div class="stat-value" style="color: #fc8181;">{stats.get('failed_steps', 0)}</div>
+                <div class="stat-value" style="color: #fc8181;">{stats.get("failed_steps", 0)}</div>
                 <div class="stat-label">失败</div>
             </div>
             <div class="stat">
-                <div class="stat-value">{stats.get('success_rate', 0)}%</div>
+                <div class="stat-value">{stats.get("success_rate", 0)}%</div>
                 <div class="stat-label">成功率</div>
             </div>
         </div>
@@ -933,7 +981,7 @@ async def main():
     materials_dir = script_dir / "research_materials"
 
     if not materials_dir.exists() or not any(materials_dir.iterdir()):
-        print(f"\n📁 素材目录为空，创建示例素材...")
+        print("\n📁 素材目录为空，创建示例素材...")
         create_sample_materials(materials_dir)
     else:
         print(f"\n📁 素材目录: {materials_dir}")
@@ -950,8 +998,7 @@ async def main():
 
     print(f"   已注册 {len(registry.get_all_tools())} 个工具:")
     for tool in registry.get_all_tools():
-        print(
-            f"   - {tool.definition.name}: {tool.definition.description[:50]}...")
+        print(f"   - {tool.definition.name}: {tool.definition.description[:50]}...")
 
     # 4. 创建智能体（带目标和约束）
     print("\n🤖 创建智能体...")
@@ -997,7 +1044,7 @@ async def main():
 
     # 用于收集执行过程和最终结果
     execution_log = []  # 执行日志
-    final_report = ""   # 最终报告
+    final_report = ""  # 最终报告
     execution_success = False
     collected_plan = None  # 执行计划
     collected_results = []  # 执行结果
@@ -1015,7 +1062,8 @@ async def main():
             if event_type == "planning":
                 print(f"\n📝 {data.get('message', '规划中...')}")
                 execution_log.append(
-                    {"event": "planning", "message": data.get('message', '')})
+                    {"event": "planning", "message": data.get("message", "")}
+                )
 
             elif event_type == "execution_plan":
                 print("\n" + "-" * 50)
@@ -1025,25 +1073,26 @@ async def main():
                 for step in data.get("steps", []):
                     pinned = "📌" if step.get("is_pinned") else "  "
                     print(
-                        f"   {pinned} Step {step['step']}: [{step['name']}] {step['description']}")
+                        f"   {pinned} Step {step['step']}: [{step['name']}] {step['description']}"
+                    )
                     steps_info.append(step)
                 print("-" * 50)
-                execution_log.append(
-                    {"event": "execution_plan", "steps": steps_info})
+                execution_log.append({"event": "execution_plan", "steps": steps_info})
 
                 # 保存规划信息用于生成报告
                 from auto_agent import ExecutionPlan, PlanStep
+
                 collected_plan = ExecutionPlan(
                     intent=data.get("description", "深度研究"),
                     subtasks=[
                         PlanStep(
-                            id=str(s.get("step", i+1)),
+                            id=str(s.get("step", i + 1)),
                             tool=s.get("name"),
                             description=s.get("description", ""),
                             expectations=s.get("expectations"),
                         )
                         for i, s in enumerate(steps_info)
-                    ]
+                    ],
                 )
 
             elif event_type == "stage_start":
@@ -1062,7 +1111,7 @@ async def main():
                 status = "✅ 成功" if success else "❌ 失败"
 
                 print(f"\n   {status}")
-                print(f"   " + "-" * 40)
+                print("   " + "-" * 40)
 
                 # 显示错误原因（如果失败）
                 if not success:
@@ -1073,22 +1122,22 @@ async def main():
                     if not error_msg:
                         error_msg = str(result) if result else "未知错误 - 无返回结果"
                     print(f"   ❗ 失败原因: {error_msg}")
-                    print(f"   " + "-" * 40)
+                    print("   " + "-" * 40)
                     continue
 
                 # 详细展示输出
                 if isinstance(result, dict):
-                    print(f"   📤 输出:")
+                    print("   📤 输出:")
 
                     # 根据不同工具显示不同的输出内容
                     if "total_files" in result:
                         print(f"      - 文件数量: {result['total_files']}")
-                        print(
-                            f"      - 总字数: {result.get('total_words', 'N/A')}")
-                        materials = result.get('materials', [])
+                        print(f"      - 总字数: {result.get('total_words', 'N/A')}")
+                        materials = result.get("materials", [])
                         for m in materials[:5]:
                             print(
-                                f"      - 📄 {m.get('filename', 'unknown')}: {m.get('summary', 'N/A')[:80]}...")
+                                f"      - 📄 {m.get('filename', 'unknown')}: {m.get('summary', 'N/A')[:80]}..."
+                            )
 
                     if "main_themes" in result:
                         themes = result.get("main_themes", [])
@@ -1099,7 +1148,8 @@ async def main():
                             for arg in args[:3]:
                                 if isinstance(arg, dict):
                                     print(
-                                        f"        • {arg.get('argument', 'N/A')[:60]}...")
+                                        f"        • {arg.get('argument', 'N/A')[:60]}..."
+                                    )
                         insight = result.get("overall_insight", "")
                         if insight:
                             print(f"      - 整体洞察: {insight[:150]}...")
@@ -1113,12 +1163,14 @@ async def main():
                         conf = result.get("confidence_assessment", {})
                         if conf:
                             print(
-                                f"      - 可信度评分: {conf.get('overall_score', 'N/A')}")
+                                f"      - 可信度评分: {conf.get('overall_score', 'N/A')}"
+                            )
 
                     if "report" in result:
                         report = result.get("report", "")
                         print(
-                            f"      - 报告字数: {result.get('word_count', len(report))}")
+                            f"      - 报告字数: {result.get('word_count', len(report))}"
+                        )
                         print(f"      - 报告预览: {report[:200]}...")
                         # 保存报告内容
                         if success and report:
@@ -1127,42 +1179,48 @@ async def main():
                     if "polished_text" in result:
                         polished = result.get("polished_text", "")
                         print(
-                            f"      - 润色后字数: {result.get('polished_length', len(polished))}")
+                            f"      - 润色后字数: {result.get('polished_length', len(polished))}"
+                        )
                         print(f"      - 润色预览: {polished[:200]}...")
                         # 更新为润色后的报告
                         if success and polished:
                             final_report = polished
 
-                print(f"   " + "-" * 40)
+                print("   " + "-" * 40)
 
                 # 记录到执行日志
-                execution_log.append({
-                    "event": "step_complete",
-                    "step": step,
-                    "name": name,
-                    "success": success,
-                    "result": result,
-                })
+                execution_log.append(
+                    {
+                        "event": "step_complete",
+                        "step": step,
+                        "name": name,
+                        "success": success,
+                        "result": result,
+                    }
+                )
 
                 # 收集执行结果用于报告生成
                 from auto_agent import SubTaskResult
-                collected_results.append(SubTaskResult(
-                    step_id=str(step),
-                    success=success,
-                    output=result,
-                    error=result.get("error") if isinstance(
-                        result, dict) else None,
-                ))
+
+                collected_results.append(
+                    SubTaskResult(
+                        step_id=str(step),
+                        success=success,
+                        output=result,
+                        error=result.get("error") if isinstance(result, dict) else None,
+                    )
+                )
 
             elif event_type == "stage_retry":
-                reason = data.get('message', '重试中...')
+                reason = data.get("message", "重试中...")
                 print(f"\n   🔄 重试: {reason}")
                 execution_log.append(
-                    {"event": "retry", "step": data.get('step'), "reason": reason})
+                    {"event": "retry", "step": data.get("step"), "reason": reason}
+                )
 
             elif event_type == "stage_replan":
-                reason = data.get('reason', '')
-                print(f"\n⚠️  触发重规划")
+                reason = data.get("reason", "")
+                print("\n⚠️  触发重规划")
                 print(f"   原因: {reason}")
                 execution_log.append({"event": "replan", "reason": reason})
 
@@ -1190,8 +1248,13 @@ async def main():
                 if data.get("errors"):
                     for err in data["errors"]:
                         print(f"   - {err}")
-                execution_log.append({"event": "error", "message": data.get(
-                    'message', ''), "errors": data.get('errors', [])})
+                execution_log.append(
+                    {
+                        "event": "error",
+                        "message": data.get("message", ""),
+                        "errors": data.get("errors", []),
+                    }
+                )
 
         # 7. 导出结果
         if final_report and collected_plan:
@@ -1201,7 +1264,10 @@ async def main():
                 plan=collected_plan,
                 results=collected_results,
                 state={
-                    "final_report": final_report[:500] + "..." if len(final_report) > 500 else final_report},
+                    "final_report": final_report[:500] + "..."
+                    if len(final_report) > 500
+                    else final_report
+                },
                 output_dir=script_dir / "output",
                 topic="人工智能在医疗领域的应用与伦理挑战",
             )
@@ -1209,6 +1275,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ 执行异常: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:

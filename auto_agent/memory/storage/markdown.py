@@ -3,7 +3,6 @@ Markdown 存储后端
 """
 
 from pathlib import Path
-from typing import Any
 
 
 class MarkdownStorage:

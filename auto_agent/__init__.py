@@ -23,29 +23,33 @@ from auto_agent.llm.client import LLMClient
 from auto_agent.llm.providers.openai import OpenAIClient
 from auto_agent.memory.categorized import CategorizedMemory, MemoryCategory, MemoryItem
 from auto_agent.memory.long_term import LongTermMemory
-from auto_agent.memory.short_term import ShortTermMemory
-# 新记忆系统 (L1/L2/L3 架构)
-from auto_agent.memory.system import MemorySystem
-from auto_agent.memory.working import WorkingMemory
-from auto_agent.memory.semantic import SemanticMemory
-from auto_agent.memory.narrative import NarrativeMemoryManager
-from auto_agent.memory.router import MemoryRouter, QueryIntent
 from auto_agent.memory.manager import create_memory_system
+from auto_agent.memory.models import (
+    MemoryCategory as NewMemoryCategory,
+)
 from auto_agent.memory.models import (
     MemoryLayer,
     MemorySource,
-    SemanticMemoryItem,
-    WorkingMemoryItem,
     NarrativeMemory,
+    SemanticMemoryItem,
     UserFeedback,
-    MemoryCategory as NewMemoryCategory,
+    WorkingMemoryItem,
 )
+from auto_agent.memory.narrative import NarrativeMemoryManager
+from auto_agent.memory.router import MemoryRouter, QueryIntent
+from auto_agent.memory.semantic import SemanticMemory
+from auto_agent.memory.short_term import ShortTermMemory
+
+# 新记忆系统 (L1/L2/L3 架构)
+from auto_agent.memory.system import MemorySystem
+from auto_agent.memory.working import WorkingMemory
 from auto_agent.models import (
     AgentResponse,
     ExecutionPlan,
     FailAction,
     Message,
     PlanStep,
+    StepResultData,
     SubTaskResult,
     ToolDefinition,
     ToolParameter,
@@ -55,7 +59,7 @@ from auto_agent.retry.models import RetryConfig, RetryStrategy
 from auto_agent.session.manager import SessionManager
 from auto_agent.session.models import Session, SessionStatus
 from auto_agent.tools.base import BaseTool
-from auto_agent.tools.registry import ToolRegistry, get_global_registry, tool, func_tool
+from auto_agent.tools.registry import ToolRegistry, func_tool, get_global_registry, tool
 
 __version__ = "0.1.0"
 
@@ -111,6 +115,7 @@ __all__ = [
     # 模型
     "Message",
     "PlanStep",
+    "StepResultData",
     "ExecutionPlan",
     "SubTaskResult",
     "AgentResponse",

@@ -43,8 +43,9 @@ class TestIntentRouter:
 
         assert result.handler_name == "writer"
         assert result.confidence > 0.5
-        assert "写" in result.parameters.get("matched_keywords", []) or \
-               "报告" in result.parameters.get("matched_keywords", [])
+        assert "写" in result.parameters.get(
+            "matched_keywords", []
+        ) or "报告" in result.parameters.get("matched_keywords", [])
 
     @pytest.mark.asyncio
     async def test_route_search_intent(self):

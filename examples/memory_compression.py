@@ -87,7 +87,10 @@ def demo_memory_compression():
             "step": 4,
             "name": "document_extraction",
             "description": "提取文档内容",
-            "result": {"success": True, "extracted_content": state["extracted_content"]},
+            "result": {
+                "success": True,
+                "extracted_content": state["extracted_content"],
+            },
         },
         {
             "step": 5,
@@ -101,7 +104,9 @@ def demo_memory_compression():
     print("原始状态大小")
     print("=" * 60)
     print(f"state 字典大小: {len(json.dumps(state, ensure_ascii=False))} 字符")
-    print(f"step_history 大小: {len(json.dumps(step_history, ensure_ascii=False))} 字符")
+    print(
+        f"step_history 大小: {len(json.dumps(step_history, ensure_ascii=False))} 字符"
+    )
 
     print("\n" + "=" * 60)
     print("压缩后状态摘要（无目标工具过滤）")

@@ -134,10 +134,9 @@ class IntentRouter:
 
     async def _route_with_llm(self, query: str) -> IntentResult:
         """使用 LLM 路由"""
-        handlers_desc = "\n".join([
-            f"- {name}: {h.description}"
-            for name, h in self._handlers.items()
-        ])
+        handlers_desc = "\n".join(
+            [f"- {name}: {h.description}" for name, h in self._handlers.items()]
+        )
 
         prompt = self.INTENT_PROMPT.format(
             query=query,

@@ -11,7 +11,6 @@ TaskPlanner（任务规划器）
 from typing import Any, Dict, List, Optional
 
 from auto_agent.llm.client import LLMClient
-from auto_agent.llm.prompts import PLANNING_PROMPT
 from auto_agent.models import ExecutionPlan, PlanStep
 from auto_agent.tools.registry import ToolRegistry
 
@@ -274,7 +273,10 @@ class TaskPlanner:
     async def _call_llm_for_plan(self, prompt: str) -> Dict[str, Any]:
         """调用 LLM 生成计划"""
         messages = [
-            {"role": "system", "content": "你是一个专业的任务规划器，请返回有效的JSON格式。"},
+            {
+                "role": "system",
+                "content": "你是一个专业的任务规划器，请返回有效的JSON格式。",
+            },
             {"role": "user", "content": prompt},
         ]
 

@@ -8,7 +8,7 @@
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from auto_agent.models import ToolDefinition, ValidationMode
 
@@ -87,7 +87,9 @@ class BaseTool(ABC):
         else:
             return validate_fn(result, expectations, state, mode, llm_client, db)
 
-    def compress_result(self, result: Dict[str, Any], state: Any) -> Optional[Dict[str, Any]]:
+    def compress_result(
+        self, result: Dict[str, Any], state: Any
+    ) -> Optional[Dict[str, Any]]:
         """
         压缩执行结果（用于短期记忆）
 

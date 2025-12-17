@@ -24,22 +24,22 @@ def create_memory_system(
 ) -> MemorySystem:
     """
     创建用户的 MemorySystem
-    
+
     推荐：直接使用 MemorySystem 类
-    
+
     Args:
         user_id: 用户 ID
         storage_base_path: 存储根路径
         llm_client: LLM 客户端（用于智能记忆检索）
         auto_save: 是否自动保存
         token_budget: 默认 Token 预算
-    
+
     Returns:
         MemorySystem 实例
     """
     storage_path = Path(storage_base_path) / user_id
     storage_path.mkdir(parents=True, exist_ok=True)
-    
+
     return MemorySystem(
         storage_path=str(storage_path),
         auto_save=auto_save,

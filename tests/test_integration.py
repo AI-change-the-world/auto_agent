@@ -10,9 +10,8 @@
 6. 生成执行报告
 """
 
-import asyncio
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import pytest
 
@@ -32,9 +31,7 @@ from auto_agent import (
     ToolDefinition,
     ToolParameter,
     ToolRegistry,
-    tool,
 )
-
 
 # ==================== 测试用工具 ====================
 
@@ -48,7 +45,9 @@ class MockAnalyzeTool(BaseTool):
             name="analyze_input",
             description="分析用户输入",
             parameters=[
-                ToolParameter(name="query", type="string", description="用户查询", required=True),
+                ToolParameter(
+                    name="query", type="string", description="用户查询", required=True
+                ),
             ],
             category="analysis",
         )
@@ -71,7 +70,9 @@ class MockSearchTool(BaseTool):
             name="es_fulltext_search",
             description="全文检索",
             parameters=[
-                ToolParameter(name="query", type="string", description="搜索查询", required=True),
+                ToolParameter(
+                    name="query", type="string", description="搜索查询", required=True
+                ),
             ],
             category="retrieval",
         )
@@ -93,7 +94,9 @@ class MockOutlineTool(BaseTool):
             name="generate_outline",
             description="生成文档大纲",
             parameters=[
-                ToolParameter(name="topic", type="string", description="文档主题", required=True),
+                ToolParameter(
+                    name="topic", type="string", description="文档主题", required=True
+                ),
             ],
             category="document",
         )
@@ -121,7 +124,9 @@ class MockComposeTool(BaseTool):
             name="document_compose",
             description="撰写文档",
             parameters=[
-                ToolParameter(name="outline", type="object", description="文档大纲", required=True),
+                ToolParameter(
+                    name="outline", type="object", description="文档大纲", required=True
+                ),
             ],
             category="document",
         )
@@ -428,10 +433,15 @@ class TestWriterAgentIntegration:
 
         # 验证结果
         assert report_data["statistics"]["successful_steps"] == 4
-        assert self.session_manager.get_session(session.session_id).status == SessionStatus.COMPLETED
+        assert (
+            self.session_manager.get_session(session.session_id).status
+            == SessionStatus.COMPLETED
+        )
 
         # 验证记忆
-        behaviors = self.memory.get_by_category(user_id, MemoryCategory.BEHAVIOR_PATTERN)
+        behaviors = self.memory.get_by_category(
+            user_id, MemoryCategory.BEHAVIOR_PATTERN
+        )
         assert len(behaviors) >= 1
 
     @pytest.mark.asyncio

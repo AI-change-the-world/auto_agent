@@ -162,7 +162,12 @@ class SemanticMemoryItem:
         access_bonus = min(0.2, self.access_count * 0.02)
 
         # 综合得分
-        score = (self.confidence * 0.4 + self.reward * 0.3 + time_decay * 0.2 + access_bonus * 0.1)
+        score = (
+            self.confidence * 0.4
+            + self.reward * 0.3
+            + time_decay * 0.2
+            + access_bonus * 0.1
+        )
 
         # 需要修订的记忆降权
         if self.needs_revision:

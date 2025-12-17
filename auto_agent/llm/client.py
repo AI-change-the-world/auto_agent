@@ -62,12 +62,12 @@ class LLMClient(ABC):
     ) -> Dict[str, Any]:
         """
         Function Calling (可选实现)
-        
+
         Args:
             messages: 消息列表
             tools: 工具定义列表
             tool_choice: 工具选择策略
-            
+
         Returns:
             包含 tool_calls 或 message 的响应
         """

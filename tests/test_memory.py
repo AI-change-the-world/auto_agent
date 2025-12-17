@@ -3,9 +3,6 @@
 """
 
 import tempfile
-import time
-
-import pytest
 
 from auto_agent.memory.categorized import (
     CategorizedMemory,
@@ -90,15 +87,21 @@ class TestCategorizedMemory:
     def test_get_by_category(self):
         """测试按分类获取记忆"""
         self.memory.set(
-            "user_001", "fb1", "反馈1",
+            "user_001",
+            "fb1",
+            "反馈1",
             category=MemoryCategory.USER_FEEDBACK,
         )
         self.memory.set(
-            "user_001", "fb2", "反馈2",
+            "user_001",
+            "fb2",
+            "反馈2",
             category=MemoryCategory.USER_FEEDBACK,
         )
         self.memory.set(
-            "user_001", "pref1", "偏好1",
+            "user_001",
+            "pref1",
+            "偏好1",
             category=MemoryCategory.PREFERENCE,
         )
 
@@ -136,16 +139,21 @@ class TestCategorizedMemory:
     def test_search_with_category(self):
         """测试带分类的全文检索"""
         self.memory.set(
-            "user_001", "k1", {"fact": "Python 是编程语言"},
+            "user_001",
+            "k1",
+            {"fact": "Python 是编程语言"},
             category=MemoryCategory.KNOWLEDGE,
         )
         self.memory.set(
-            "user_001", "f1", {"feedback": "Python 很好用"},
+            "user_001",
+            "f1",
+            {"feedback": "Python 很好用"},
             category=MemoryCategory.USER_FEEDBACK,
         )
 
         results = self.memory.search(
-            "user_001", "Python",
+            "user_001",
+            "Python",
             category=MemoryCategory.KNOWLEDGE,
         )
 

@@ -31,7 +31,9 @@ class NarrativeMemoryManager:
     """
 
     def __init__(self, storage_path: Optional[str] = None):
-        self._narratives: Dict[str, Dict[str, NarrativeMemory]] = {}  # user_id -> {narrative_id -> item}
+        self._narratives: Dict[
+            str, Dict[str, NarrativeMemory]
+        ] = {}  # user_id -> {narrative_id -> item}
         self._storage_path = Path(storage_path) if storage_path else None
 
         if self._storage_path:
@@ -82,7 +84,9 @@ class NarrativeMemoryManager:
         self._ensure_loaded(user_id)
 
         items = [
-            n for n in self._narratives.get(user_id, {}).values() if n.category == category
+            n
+            for n in self._narratives.get(user_id, {}).values()
+            if n.category == category
         ]
         items.sort(key=lambda x: x.updated_at, reverse=True)
         return items[:limit]
@@ -210,7 +214,9 @@ class NarrativeMemoryManager:
             core_lines = [
                 line
                 for line in content_lines
-                if line.strip() and not line.startswith("#") and not line.startswith(">")
+                if line.strip()
+                and not line.startswith("#")
+                and not line.startswith(">")
             ]
             core_content = "\n".join(core_lines[:10])  # 最多 10 行
 
@@ -292,9 +298,15 @@ updated_at: {narrative.updated_at}
                             narrative_id=narrative_id.group(1).strip(),
                             title=md_file.stem,
                             content_md=content_md.strip(),
-                            category=MemoryCategory(category.group(1).strip()) if category else MemoryCategory.CUSTOM,
-                            created_at=int(created_at.group(1)) if created_at else int(time.time()),
-                            updated_at=int(updated_at.group(1)) if updated_at else int(time.time()),
+                            category=MemoryCategory(category.group(1).strip())
+                            if category
+                            else MemoryCategory.CUSTOM,
+                            created_at=int(created_at.group(1))
+                            if created_at
+                            else int(time.time()),
+                            updated_at=int(updated_at.group(1))
+                            if updated_at
+                            else int(time.time()),
                         )
                         self._narratives[user_id][nar.narrative_id] = nar
             except Exception:

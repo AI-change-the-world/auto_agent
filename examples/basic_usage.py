@@ -4,7 +4,7 @@
 
 import asyncio
 
-from auto_agent import AutoAgent, LLMClient, ToolRegistry
+from auto_agent import AutoAgent, ToolRegistry
 from auto_agent.memory import LongTermMemory, ShortTermMemory
 from auto_agent.tools.builtin.calculator import CalculatorTool
 from auto_agent.tools.builtin.web_search import WebSearchTool

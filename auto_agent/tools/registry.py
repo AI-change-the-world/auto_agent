@@ -10,7 +10,7 @@
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from auto_agent.models import ToolDefinition, ToolParameter, ValidationMode
+from auto_agent.models import ToolDefinition, ToolParameter
 from auto_agent.tools.base import BaseTool
 
 
@@ -119,7 +119,7 @@ class ToolRegistry:
                 output_text = "success(boolean), error?(string)"
 
             catalog_lines.append(
-                f"{i+1}. **{defn.name}** {capabilities}\n"
+                f"{i + 1}. **{defn.name}** {capabilities}\n"
                 f"   描述: {desc[:200]}\n"
                 f"   输入参数:\n     - {params_text}\n"
                 f"   输出字段: {output_text}"
@@ -155,7 +155,7 @@ class ToolRegistry:
             ksources = ", ".join(details["sources"])
 
             catalog_lines.append(
-                f"{i+1}. **{key}** ({ktype})\n"
+                f"{i + 1}. **{key}** ({ktype})\n"
                 f"   说明: {kdesc}\n"
                 f"   来源工具: {ksources}"
             )
@@ -525,7 +525,9 @@ def func_tool(
             registry.register(instance)
 
         # 保存工具实例到函数属性，方便访问
-        func._tool_instance = FuncTool() if not auto_register else registry.get_tool(name)
+        func._tool_instance = (
+            FuncTool() if not auto_register else registry.get_tool(name)
+        )
         func._tool_class = FuncTool
 
         return func

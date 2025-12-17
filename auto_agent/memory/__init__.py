@@ -15,6 +15,16 @@ Memory 模块
 """
 
 # 新架构
+# 兼容旧接口
+from auto_agent.memory.categorized import (
+    CategorizedMemory,
+    MemoryItem,
+)
+from auto_agent.memory.categorized import (
+    MemoryCategory as OldMemoryCategory,
+)
+from auto_agent.memory.long_term import LongTermMemory
+from auto_agent.memory.manager import create_memory_system
 from auto_agent.memory.models import (
     MemoryCategory,
     MemoryLayer,
@@ -24,21 +34,12 @@ from auto_agent.memory.models import (
     UserFeedback,
     WorkingMemoryItem,
 )
-from auto_agent.memory.working import WorkingMemory
-from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter, QueryIntent
-from auto_agent.memory.system import MemorySystem
-from auto_agent.memory.manager import create_memory_system
-
-# 兼容旧接口
-from auto_agent.memory.categorized import (
-    CategorizedMemory,
-    MemoryCategory as OldMemoryCategory,
-    MemoryItem,
-)
-from auto_agent.memory.long_term import LongTermMemory
+from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.short_term import ShortTermMemory
+from auto_agent.memory.system import MemorySystem
+from auto_agent.memory.working import WorkingMemory
 
 __all__ = [
     # 新架构 - 核心

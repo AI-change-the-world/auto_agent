@@ -2,10 +2,6 @@
 会话管理器测试
 """
 
-import time
-
-import pytest
-
 from auto_agent.session.manager import SessionManager
 from auto_agent.session.models import SessionStatus
 

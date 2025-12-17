@@ -14,11 +14,11 @@
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from auto_agent.memory.models import MemoryCategory, SemanticMemoryItem
-from auto_agent.memory.semantic import SemanticMemory
 from auto_agent.memory.narrative import NarrativeMemoryManager
+from auto_agent.memory.semantic import SemanticMemory
 
 if TYPE_CHECKING:
     from auto_agent.llm.client import LLMClient
@@ -177,7 +177,8 @@ class MemoryRouter:
                 result = json.loads(json_match.group())
                 # 转换 categories 为 MemoryCategory
                 result["categories"] = [
-                    MemoryCategory(c) for c in result.get("categories", [])
+                    MemoryCategory(c)
+                    for c in result.get("categories", [])
                     if c in [mc.value for mc in MemoryCategory]
                 ]
                 return result

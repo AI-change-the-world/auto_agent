@@ -14,7 +14,7 @@ from auto_agent.models import PlanStep
 
 class AgentDefinition:
     """Agent 定义结构"""
-    
+
     def __init__(
         self,
         name: str,
@@ -58,13 +58,13 @@ class AgentDefinition:
 class AgentMarkdownParser:
     """
     Agent Markdown 解析器
-    
+
     支持两种解析模式:
     1. LLM 解析: 使用大模型理解自然语言描述
     2. 规则解析: 基于简单规则提取结构化信息
     """
 
-    PARSE_PROMPT = '''你是一个专业的 Agent 规划助手。
+    PARSE_PROMPT = """你是一个专业的 Agent 规划助手。
 
 【任务】
 用户会用 Markdown 描述他想要的 Agent 功能。你需要将其转换为结构化的 Agent 定义。
@@ -110,7 +110,7 @@ class AgentMarkdownParser:
 
 【用户输入】
 {content}
-'''
+"""
 
     def __init__(self, llm_client: Optional[LLMClient] = None):
         self.llm_client = llm_client
@@ -122,11 +122,11 @@ class AgentMarkdownParser:
     ) -> Dict[str, Any]:
         """
         解析 Markdown 格式的 Agent 定义
-        
+
         Args:
             content: Markdown 内容
             tools_catalog: 可用工具目录
-            
+
         Returns:
             解析结果，包含 agent 定义和错误/警告信息
         """
@@ -145,22 +145,25 @@ class AgentMarkdownParser:
             content=content,
             tools_catalog=tools_catalog or "无可用工具信息",
         )
-        
+
         messages = [
-            {"role": "system", "content": "你是一个专业的 Agent 规划助手，请返回有效的 JSON 格式。"},
+            {
+                "role": "system",
+                "content": "你是一个专业的 Agent 规划助手，请返回有效的 JSON 格式。",
+            },
             {"role": "user", "content": prompt},
         ]
-        
+
         try:
             response = await self.llm_client.chat(messages, temperature=0.3)
-            
+
             # 提取 JSON
             json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
             if json_match:
                 response = json_match.group(1)
-            
+
             result = json.loads(response)
-            
+
             # 转换为 AgentDefinition
             agent = AgentDefinition(
                 name=result.get("name", "Unnamed Agent"),
@@ -179,14 +182,14 @@ class AgentMarkdownParser:
                 ],
                 state_schema=result.get("state_schema", {}),
             )
-            
+
             return {
                 "success": True,
                 "agent": agent,
                 "errors": result.get("errors", []),
                 "warnings": result.get("warnings", []),
             }
-            
+
         except Exception as e:
             return {
                 "success": False,
@@ -198,21 +201,21 @@ class AgentMarkdownParser:
     def _parse_with_rules(self, content: str) -> Dict[str, Any]:
         """使用规则解析 (无 LLM 时的降级方案)"""
         lines = content.strip().split("\n")
-        
+
         name = "Unnamed Agent"
         description = ""
         goals = []
         constraints = []
         steps = []
-        
+
         current_section = None
         step_counter = 0
-        
+
         for line in lines:
             line = line.strip()
             if not line:
                 continue
-                
+
             # 解析标题
             if line.startswith("# "):
                 name = line[2:].strip()
@@ -236,16 +239,18 @@ class AgentMarkdownParser:
                 # 解析步骤
                 step_text = re.sub(r"^\d+\.\s*", "", line)
                 step_counter += 1
-                
+
                 # 提取工具名 [tool_name]
                 tool_match = re.search(r"\[(\w+)\]", step_text)
                 tool_name = tool_match.group(1) if tool_match else None
-                
-                steps.append(PlanStep(
-                    id=str(step_counter),
-                    tool=tool_name,
-                    description=step_text,
-                ))
+
+                steps.append(
+                    PlanStep(
+                        id=str(step_counter),
+                        tool=tool_name,
+                        description=step_text,
+                    )
+                )
             elif current_section == "description" or current_section is None:
                 if description:
                     description += " "
@@ -262,7 +267,7 @@ class AgentMarkdownParser:
             constraints=constraints,
             initial_plan=steps,
         )
-        
+
         return {
             "success": True,
             "agent": agent,

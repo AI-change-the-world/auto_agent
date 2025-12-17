@@ -185,7 +185,8 @@ class SessionManager:
     ) -> List[Session]:
         """获取用户的会话列表"""
         sessions = [
-            s for s in self._sessions.values()
+            s
+            for s in self._sessions.values()
             if s.user_id == user_id and (status is None or s.status == status)
         ]
         sessions.sort(key=lambda s: s.updated_at, reverse=True)
@@ -212,9 +213,7 @@ class SessionManager:
         """清理过期会话"""
         current_time = int(time.time())
         expired = [
-            sid
-            for sid, s in self._sessions.items()
-            if current_time > s.expires_at
+            sid for sid, s in self._sessions.items() if current_time > s.expires_at
         ]
         for sid in expired:
             session = self._sessions.pop(sid, None)

@@ -12,7 +12,7 @@
 import warnings
 from functools import wraps
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from auto_agent.memory.base import BaseMemory
 from auto_agent.memory.models import UserMemory
@@ -21,7 +21,7 @@ from auto_agent.memory.models import UserMemory
 def _deprecated_class(cls):
     """类弃用装饰器"""
     original_init = cls.__init__
-    
+
     @wraps(original_init)
     def new_init(self, *args, **kwargs):
         warnings.warn(
@@ -31,7 +31,7 @@ def _deprecated_class(cls):
             stacklevel=2,
         )
         original_init(self, *args, **kwargs)
-    
+
     cls.__init__ = new_init
     return cls
 
@@ -43,7 +43,7 @@ class LongTermMemory(BaseMemory):
 
     .. deprecated::
         此类已弃用，请使用 MemorySystem 或 SemanticMemory 替代。
-        
+
         迁移指南：
         - LongTermMemory.add_fact() -> MemorySystem.add_knowledge()
         - LongTermMemory.search_memory() -> MemorySystem.search_memory()

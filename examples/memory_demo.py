@@ -9,9 +9,9 @@
 """
 
 import asyncio
-import time
-from auto_agent import MemorySystem, OpenAIClient
-from auto_agent.memory.models import MemoryCategory, MemorySource
+
+from auto_agent import MemorySystem
+from auto_agent.memory.models import MemoryCategory
 
 
 class MemoryTriggerDemo:
@@ -71,7 +71,9 @@ class MemoryTriggerDemo:
             tags=["学习", "AI", "Agent"],
         )
 
-        print(f"✅ 初始化完成，共 {len(self.memory.semantic._memories.get(self.user_id, {}))} 条记忆")
+        print(
+            f"✅ 初始化完成，共 {len(self.memory.semantic._memories.get(self.user_id, {}))} 条记忆"
+        )
 
     def demonstrate_trigger_conditions(self):
         """演示记忆触发条件"""
@@ -151,13 +153,17 @@ class MemoryTriggerDemo:
         print("\n👍 用户给出正反馈...")
         self.memory.thumbs_up(self.user_id, item.memory_id)
         updated = self.memory.get_memory(self.user_id, item.memory_id)
-        print(f"正反馈后 - 置信度: {updated.confidence:.2f}, 奖励: {updated.reward:.2f}")
+        print(
+            f"正反馈后 - 置信度: {updated.confidence:.2f}, 奖励: {updated.reward:.2f}"
+        )
 
         # 负反馈
         print("\n👎 用户给出负反馈...")
         self.memory.thumbs_down(self.user_id, item.memory_id, reason="项目不需要 ORM")
         updated = self.memory.get_memory(self.user_id, item.memory_id)
-        print(f"负反馈后 - 置信度: {updated.confidence:.2f}, 奖励: {updated.reward:.2f}")
+        print(
+            f"负反馈后 - 置信度: {updated.confidence:.2f}, 奖励: {updated.reward:.2f}"
+        )
         print(f"需要修订: {updated.needs_revision}")
 
         # 展示得分变化
@@ -278,6 +284,7 @@ class MemoryTriggerDemo:
         except Exception as e:
             print(f"❌ 演示过程中出错: {e}")
             import traceback
+
             traceback.print_exc()
 
 

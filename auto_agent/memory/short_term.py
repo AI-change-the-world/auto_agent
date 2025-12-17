@@ -10,7 +10,7 @@
 .. deprecated::
     对话历史和工作记忆功能已弃用，请使用新的 L1 短时记忆：
     - auto_agent.memory.working.WorkingMemory
-    
+
     但 summarize_state() 方法仍然可用，用于压缩执行状态。
 """
 
@@ -21,14 +21,15 @@ import warnings
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional
 
-from auto_agent.memory.models import ConversationMemory, WorkingMemoryData as WorkingMemory
+from auto_agent.memory.models import ConversationMemory
+from auto_agent.memory.models import WorkingMemoryData as WorkingMemory
 from auto_agent.models import Message
 
 
 def _deprecated_class_partial(cls):
     """部分弃用的类装饰器"""
     original_init = cls.__init__
-    
+
     @wraps(original_init)
     def new_init(self, *args, **kwargs):
         warnings.warn(
@@ -39,7 +40,7 @@ def _deprecated_class_partial(cls):
             stacklevel=2,
         )
         original_init(self, *args, **kwargs)
-    
+
     cls.__init__ = new_init
     return cls
 
@@ -51,12 +52,12 @@ class ShortTermMemory:
 
     .. deprecated::
         对话历史和工作记忆功能已弃用，请使用 WorkingMemory 替代。
-        
+
         迁移指南：
         - ShortTermMemory.create_conversation() -> WorkingMemory.start_task()
         - ShortTermMemory.add_message() -> WorkingMemory.add_tool_call()
         - ShortTermMemory.get_working_memory() -> MemorySystem.get_working_memory()
-        
+
         注意：summarize_state() 方法仍然可用，用于压缩执行状态。
 
     支持：
@@ -248,7 +249,7 @@ class ShortTermMemory:
         智能过滤历史步骤
 
         基于工具依赖关系，优先保留与目标工具相关的步骤
-        
+
         Args:
             step_history: 步骤历史
             target_tool_name: 目标工具名称
@@ -277,17 +278,21 @@ class ShortTermMemory:
             reverse=True,
         )[:max_steps]
 
-        return relevant_steps[-max_steps:] if len(relevant_steps) > max_steps else relevant_steps
+        return (
+            relevant_steps[-max_steps:]
+            if len(relevant_steps) > max_steps
+            else relevant_steps
+        )
 
     def _default_compress_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
         默认结果压缩策略
-        
+
         通用的压缩逻辑，当工具没有定义 compress_function 时使用
         """
         if not isinstance(result, dict):
             return result
-            
+
         compressed_result = {}
 
         for key, value in result.items():
@@ -308,7 +313,7 @@ class ShortTermMemory:
                     # 大型字典只保留键名和摘要
                     compressed_result[key] = {
                         "_keys": list(value.keys())[:10],
-                        "_summary": f"<dict with {len(value)} keys, {len(value_str)} chars>"
+                        "_summary": f"<dict with {len(value)} keys, {len(value_str)} chars>",
                     }
                 else:
                     compressed_result[key] = value
@@ -324,11 +329,11 @@ class ShortTermMemory:
     def _summarize_available_data(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         生成可用数据摘要
-        
+
         通用的摘要逻辑，不依赖特定字段名
         """
         available_data = {}
-        
+
         # 跳过的内部字段
         skip_keys = {"inputs", "control", "last_failure", "_internal"}
 
@@ -348,7 +353,7 @@ class ShortTermMemory:
                 if len(value_str) > 200:
                     available_data[key] = {
                         "_keys": list(value.keys())[:5],
-                        "_size": f"{len(value_str)} chars"
+                        "_size": f"{len(value_str)} chars",
                     }
                 else:
                     available_data[key] = value

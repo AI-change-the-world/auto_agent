@@ -8,9 +8,7 @@
 """
 
 from auto_agent.models import ValidationMode
-from auto_agent.tools import BaseTool, ToolRegistry, tool
-from auto_agent.tools.models import ToolDefinition, ToolParameter
-
+from auto_agent.tools import BaseTool, tool
 
 # ==================== 示例1: 基础工具（无验证） ====================
 
@@ -20,7 +18,12 @@ from auto_agent.tools.models import ToolDefinition, ToolParameter
     description="简单计算器",
     category="math",
     parameters=[
-        {"name": "expression", "type": "string", "description": "数学表达式", "required": True}
+        {
+            "name": "expression",
+            "type": "string",
+            "description": "数学表达式",
+            "required": True,
+        }
     ],
 )
 class CalculatorTool(BaseTool):
@@ -97,9 +100,19 @@ def compress_search(result, state):
     description="全文检索工具",
     category="retrieval",
     parameters=[
-        {"name": "query", "type": "string", "description": "搜索查询", "required": True},
+        {
+            "name": "query",
+            "type": "string",
+            "description": "搜索查询",
+            "required": True,
+        },
         {"name": "template_id", "type": "integer", "description": "模板ID"},
-        {"name": "max_results", "type": "integer", "description": "最大结果数", "default": 10},
+        {
+            "name": "max_results",
+            "type": "integer",
+            "description": "最大结果数",
+            "default": 10,
+        },
     ],
     output_schema={
         "document_ids": {"type": "array", "description": "文档ID列表"},
@@ -112,11 +125,17 @@ def compress_search(result, state):
 class ESFulltextSearchTool(BaseTool):
     """全文检索工具（示例）"""
 
-    async def execute(self, query: str, template_id: int = None, max_results: int = 10) -> dict:
+    async def execute(
+        self, query: str, template_id: int = None, max_results: int = 10
+    ) -> dict:
         # 模拟检索结果
         mock_ids = [f"doc_{i}" for i in range(max_results)]
         mock_docs = [
-            {"id": f"doc_{i}", "title": f"文档 {i}", "content": f"这是文档 {i} 的内容..."}
+            {
+                "id": f"doc_{i}",
+                "title": f"文档 {i}",
+                "content": f"这是文档 {i} 的内容...",
+            }
             for i in range(max_results)
         ]
         return {

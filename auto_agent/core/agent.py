@@ -18,13 +18,12 @@ AutoAgent 主类
 - Memory 系统由 ExecutionEngine 内部管理
 """
 
-import time
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from auto_agent.core.executor import ExecutionEngine
 from auto_agent.core.planner import TaskPlanner
 from auto_agent.llm.client import LLMClient
-from auto_agent.models import AgentResponse, ExecutionPlan, Message, PlanStep
+from auto_agent.models import AgentResponse
 from auto_agent.retry.models import RetryConfig
 from auto_agent.tools.registry import ToolRegistry
 
@@ -129,7 +128,7 @@ class AutoAgent:
 
         results = []
         final_state = state
-        
+
         async for event in self.executor.execute_plan_stream(
             plan=plan,
             state=state,
@@ -182,7 +181,10 @@ class AutoAgent:
         )
 
         if plan.errors:
-            yield {"event": "error", "data": {"message": "规划失败", "errors": plan.errors}}
+            yield {
+                "event": "error",
+                "data": {"message": "规划失败", "errors": plan.errors},
+            }
             return
 
         yield {
@@ -283,10 +285,14 @@ class AutoAgent:
                 if isinstance(defn, dict):
                     ftype = defn.get("type", "dict")
                     state[field] = (
-                        [] if ftype == "list" else ({} if ftype == "dict" else defn.get("default"))
+                        []
+                        if ftype == "list"
+                        else ({} if ftype == "dict" else defn.get("default"))
                     )
                 elif isinstance(defn, str):
-                    state[field] = [] if defn == "list" else ({} if defn == "dict" else None)
+                    state[field] = (
+                        [] if defn == "list" else ({} if defn == "dict" else None)
+                    )
                 else:
                     state[field] = {}
 
@@ -295,7 +301,9 @@ class AutoAgent:
     def _aggregate_results(self, state: Dict[str, Any]) -> str:
         """聚合执行结果"""
         # 检查是否有最终文档
-        final_document = state.get("reviewed_document") or state.get("composed_document")
+        final_document = state.get("reviewed_document") or state.get(
+            "composed_document"
+        )
         if final_document:
             return final_document.get("content", "执行完成")
 

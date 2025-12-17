@@ -73,7 +73,9 @@ class WorkingMemory:
         """记录子任务"""
         return self.add("subtask", subtask, step_id=step_id)
 
-    def add_decision(self, decision: str, reasoning: str, step_id: Optional[str] = None) -> WorkingMemoryItem:
+    def add_decision(
+        self, decision: str, reasoning: str, step_id: Optional[str] = None
+    ) -> WorkingMemoryItem:
         """记录决策"""
         return self.add(
             "decision",
@@ -100,7 +102,9 @@ class WorkingMemory:
             step_id=step_id,
         )
 
-    def add_result(self, result: Any, step_id: Optional[str] = None) -> WorkingMemoryItem:
+    def add_result(
+        self, result: Any, step_id: Optional[str] = None
+    ) -> WorkingMemoryItem:
         """记录结果"""
         return self.add("result", result, step_id=step_id)
 
@@ -150,7 +154,9 @@ class WorkingMemory:
             for tc in tool_calls[-5:]:  # 最近 5 个
                 content = tc.content
                 status = "✓" if content.get("success") else "✗"
-                lines.append(f"  {status} {content.get('tool')}: {self._summarize(content.get('result'))}")
+                lines.append(
+                    f"  {status} {content.get('tool')}: {self._summarize(content.get('result'))}"
+                )
 
         # 添加决策
         if decisions:
@@ -197,24 +203,28 @@ class WorkingMemory:
         # 1. 使用 LLM 从执行历史中抽象出可复用的策略
         # 2. 或者让用户显式确认哪些经验值得保存
         # 3. 或者在多次相似任务后，自动识别模式
-        
+
         return []
-    
+
     def get_execution_summary(self) -> Dict[str, Any]:
         """
         获取执行摘要（供外部分析或 LLM 提炼使用）
-        
+
         这个方法返回执行历史的结构化摘要，
         但不直接转化为 L2 记忆。
         """
         successful_tools = [
-            i for i in self._items if i.item_type == "tool_call" and i.content.get("success")
+            i
+            for i in self._items
+            if i.item_type == "tool_call" and i.content.get("success")
         ]
         failed_tools = [
-            i for i in self._items if i.item_type == "tool_call" and not i.content.get("success")
+            i
+            for i in self._items
+            if i.item_type == "tool_call" and not i.content.get("success")
         ]
         decisions = [i for i in self._items if i.item_type == "decision"]
-        
+
         return {
             "query": self._query,
             "task_id": self._task_id,

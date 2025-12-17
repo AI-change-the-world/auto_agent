@@ -48,7 +48,9 @@ class SemanticMemory:
         auto_save: bool = True,
         time_decay_factor: float = 0.01,
     ):
-        self._memories: Dict[str, Dict[str, SemanticMemoryItem]] = {}  # user_id -> {memory_id -> item}
+        self._memories: Dict[
+            str, Dict[str, SemanticMemoryItem]
+        ] = {}  # user_id -> {memory_id -> item}
         self._feedbacks: Dict[str, List[UserFeedback]] = {}  # user_id -> feedbacks
         self._storage_path = Path(storage_path) if storage_path else None
         self._auto_save = auto_save
@@ -205,7 +207,9 @@ class SemanticMemory:
             items.append(item)
 
         # 按综合得分排序
-        items.sort(key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True)
+        items.sort(
+            key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True
+        )
         return items[:limit]
 
     def get_by_tags(
@@ -229,7 +233,9 @@ class SemanticMemory:
                 if any(tag in item.tags for tag in tags):
                     items.append(item)
 
-        items.sort(key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True)
+        items.sort(
+            key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True
+        )
         return items[:limit]
 
     def search(
@@ -267,7 +273,9 @@ class SemanticMemory:
 
             if match_score > 0:
                 # 综合得分 = 匹配分数 * 记忆质量分数
-                total_score = match_score * item.calculate_score(self._time_decay_factor)
+                total_score = match_score * item.calculate_score(
+                    self._time_decay_factor
+                )
                 results.append((total_score, item))
 
         results.sort(key=lambda x: x[0], reverse=True)
@@ -290,7 +298,9 @@ class SemanticMemory:
                 continue
             items.append(item)
 
-        items.sort(key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True)
+        items.sort(
+            key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True
+        )
         return items[:limit]
 
     # ==================== 反馈系统 ====================
@@ -450,7 +460,9 @@ class SemanticMemory:
                 relevant.append(p)
 
         # 4. 按得分排序
-        relevant.sort(key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True)
+        relevant.sort(
+            key=lambda x: x.calculate_score(self._time_decay_factor), reverse=True
+        )
 
         # 5. 生成上下文
         for item in relevant:
@@ -497,7 +509,8 @@ class SemanticMemory:
             "user_id": user_id,
             "version": "2.0",  # 新版本标识
             "memories": {
-                mid: item.to_dict() for mid, item in self._memories.get(user_id, {}).items()
+                mid: item.to_dict()
+                for mid, item in self._memories.get(user_id, {}).items()
             },
             "feedbacks": [f.to_dict() for f in self._feedbacks.get(user_id, [])],
         }
@@ -622,7 +635,9 @@ created_at: {time.strftime("%Y-%m-%d %H:%M:%S")}
         self._ensure_loaded(user_id)
 
         expired = [
-            mid for mid, item in self._memories.get(user_id, {}).items() if item.is_expired()
+            mid
+            for mid, item in self._memories.get(user_id, {}).items()
+            if item.is_expired()
         ]
 
         for mid in expired:

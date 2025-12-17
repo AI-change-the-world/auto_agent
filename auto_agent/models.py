@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
-
 # ==================== 验证模式枚举 ====================
 
 
@@ -138,9 +137,9 @@ class FailAction:
 class ErrorRecoveryStrategy:
     """
     错误恢复策略配置
-    
+
     用于定义工具执行失败时的恢复策略
-    
+
     Attributes:
         error_pattern: 错误匹配模式（正则表达式）
         recovery_action: 恢复动作类型
@@ -151,12 +150,14 @@ class ErrorRecoveryStrategy:
         fix_suggestion: 修正建议（供 LLM 参考）
         max_attempts: 最大尝试次数
     """
-    
+
     error_pattern: str  # 错误匹配模式（正则表达式）
-    recovery_action: str  # 恢复动作: "retry_with_fix", "use_alternative", "skip", "abort"
+    recovery_action: (
+        str  # 恢复动作: "retry_with_fix", "use_alternative", "skip", "abort"
+    )
     fix_suggestion: Optional[str] = None  # 修正建议（供 LLM 参考）
     max_attempts: int = 3
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -171,9 +172,9 @@ class ErrorRecoveryStrategy:
 class ParameterValidator:
     """
     参数验证器
-    
+
     用于在工具执行前验证参数有效性
-    
+
     Attributes:
         parameter_name: 要验证的参数名称
         validation_type: 验证类型
@@ -188,12 +189,12 @@ class ParameterValidator:
             - custom: 自定义验证函数名
         error_message: 验证失败时的错误消息
     """
-    
+
     parameter_name: str
     validation_type: str  # "regex", "range", "enum", "custom"
     validation_rule: str
     error_message: str
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
@@ -205,6 +206,56 @@ class ParameterValidator:
 
 
 # ==================== 工具定义增强 ====================
+
+
+@dataclass
+class StepResultData:
+    """
+    步骤执行结果的结构化数据
+
+    用于 LLM 语义理解参数映射，每个步骤执行后生成此结构
+
+    Attributes:
+        step_id: 步骤 ID
+        tool_name: 工具名称
+        target: 这一步的目标（简短描述）
+        description: 对结果/过程的语义描述（供 LLM 判断相关性）
+        input_data: 输入数据结构
+        output_data: 输出数据结构
+        success: 是否成功
+        error: 错误信息（如果失败）
+    """
+
+    step_id: str
+    tool_name: str
+    target: str  # 这一步的目标，如 "查找相关文档"
+    description: str  # 语义描述，如 "找到了3个文档，相关性分别是0.9/0.8/0.7"
+    input_data: Dict[str, Any] = field(
+        default_factory=dict
+    )  # {"type": "list", "value": [...]}
+    output_data: Dict[str, Any] = field(
+        default_factory=dict
+    )  # {"type": "dict", "value": {...}}
+    success: bool = True
+    error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "step_id": self.step_id,
+            "tool_name": self.tool_name,
+            "target": self.target,
+            "description": self.description,
+            "input": self.input_data,
+            "output": self.output_data,
+            "success": self.success,
+            "error": self.error,
+        }
+
+    def to_llm_summary(self) -> str:
+        """生成供 LLM 理解的摘要"""
+        status = "✓" if self.success else f"✗ ({self.error})"
+        return f"[{self.tool_name}] {status} 目标: {self.target} | 结果: {self.description}"
 
 
 @dataclass
@@ -246,6 +297,10 @@ class ToolDefinition:
 
     # 参数别名映射：{param_name: state_field_name}
     # 例如 {"input_text": "query"} 表示从 state["query"] 读取值赋给 input_text 参数
+    #
+    # ⚠️ DEPRECATED: 此参数将在未来版本中移除
+    # 推荐使用 LLM 语义理解自动完成参数映射，而不是手动定义别名
+    # 新的参数构造机制会基于 StepResultData 的 description 字段进行语义匹配
     param_aliases: Dict[str, str] = field(default_factory=dict)
 
     # 状态写入映射：{result_field: state_field}
@@ -261,13 +316,15 @@ class ToolDefinition:
     dynamic_prompt: bool = False
 
     # === 错误恢复配置（新增） ===
-    
+
     # 错误恢复策略列表：定义不同错误类型的恢复策略
-    error_recovery_strategies: List["ErrorRecoveryStrategy"] = field(default_factory=list)
-    
+    error_recovery_strategies: List["ErrorRecoveryStrategy"] = field(
+        default_factory=list
+    )
+
     # 替代工具列表：当本工具失败时可尝试的替代方案
     alternative_tools: List[str] = field(default_factory=list)
-    
+
     # 参数验证器列表：在执行前验证参数有效性
     parameter_validators: List["ParameterValidator"] = field(default_factory=list)
 
@@ -293,21 +350,21 @@ class ToolDefinition:
             "examples": self.examples,
             "output_schema": self.output_schema,
         }
-        
+
         # 添加错误恢复配置（仅当有配置时）
         if self.error_recovery_strategies:
             result["error_recovery_strategies"] = [
                 s.to_dict() for s in self.error_recovery_strategies
             ]
-        
+
         if self.alternative_tools:
             result["alternative_tools"] = self.alternative_tools
-        
+
         if self.parameter_validators:
             result["parameter_validators"] = [
                 v.to_dict() for v in self.parameter_validators
             ]
-        
+
         return result
 
     def to_openai_schema(self) -> Dict[str, Any]:
