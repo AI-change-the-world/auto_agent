@@ -4,11 +4,7 @@
 
 import tempfile
 
-from auto_agent.memory.categorized import (
-    CategorizedMemory,
-    MemoryCategory,
-    MemoryItem,
-)
+from auto_agent.memory.categorized import CategorizedMemory, MemoryCategory, MemoryItem
 
 
 class TestCategorizedMemory:

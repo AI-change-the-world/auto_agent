@@ -21,12 +21,7 @@ from auto_agent.core.report.generator import ExecutionReportGenerator
 from auto_agent.core.router.intent import IntentHandler, IntentResult, IntentRouter
 from auto_agent.llm.client import LLMClient
 from auto_agent.llm.providers.openai import OpenAIClient
-from auto_agent.memory.categorized import CategorizedMemory, MemoryCategory, MemoryItem
-from auto_agent.memory.long_term import LongTermMemory
 from auto_agent.memory.manager import create_memory_system
-from auto_agent.memory.models import (
-    MemoryCategory as NewMemoryCategory,
-)
 from auto_agent.memory.models import (
     MemoryLayer,
     MemorySource,
@@ -38,7 +33,6 @@ from auto_agent.memory.models import (
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter, QueryIntent
 from auto_agent.memory.semantic import SemanticMemory
-from auto_agent.memory.short_term import ShortTermMemory
 
 # 新记忆系统 (L1/L2/L3 架构)
 from auto_agent.memory.system import MemorySystem
@@ -56,8 +50,6 @@ from auto_agent.models import (
     ValidationMode,
 )
 from auto_agent.retry.models import RetryConfig, RetryStrategy
-from auto_agent.session.manager import SessionManager
-from auto_agent.session.models import Session, SessionStatus
 from auto_agent.tools.base import BaseTool
 from auto_agent.tools.registry import ToolRegistry, func_tool, get_global_registry, tool
 
@@ -80,10 +72,6 @@ __all__ = [
     "IntentRouter",
     "IntentHandler",
     "IntentResult",
-    # 会话
-    "SessionManager",
-    "Session",
-    "SessionStatus",
     # 工具
     "ToolRegistry",
     "BaseTool",
@@ -92,12 +80,6 @@ __all__ = [
     "get_global_registry",
     "ToolDefinition",
     "ToolParameter",
-    # 记忆 (旧接口)
-    "LongTermMemory",
-    "ShortTermMemory",
-    "CategorizedMemory",
-    "MemoryCategory",
-    "MemoryItem",
     # 记忆 (新架构 L1/L2/L3)
     "MemorySystem",
     "WorkingMemory",

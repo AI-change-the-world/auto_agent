@@ -10,20 +10,8 @@ Memory 模块
 - MemorySystem: 整合三层记忆的统一系统
 - MemoryRouter: 记忆路由与注入控制
 
-兼容旧接口：
-- CategorizedMemory, LongTermMemory, ShortTermMemory
 """
 
-# 新架构
-# 兼容旧接口
-from auto_agent.memory.categorized import (
-    CategorizedMemory,
-    MemoryItem,
-)
-from auto_agent.memory.categorized import (
-    MemoryCategory as OldMemoryCategory,
-)
-from auto_agent.memory.long_term import LongTermMemory
 from auto_agent.memory.manager import create_memory_system
 from auto_agent.memory.models import (
     MemoryCategory,
@@ -37,7 +25,6 @@ from auto_agent.memory.models import (
 from auto_agent.memory.narrative import NarrativeMemoryManager
 from auto_agent.memory.router import MemoryRouter, QueryIntent
 from auto_agent.memory.semantic import SemanticMemory
-from auto_agent.memory.short_term import ShortTermMemory
 from auto_agent.memory.system import MemorySystem
 from auto_agent.memory.working import WorkingMemory
 
@@ -61,9 +48,4 @@ __all__ = [
     "MemoryLayer",
     "MemorySource",
     "UserFeedback",
-    # 兼容旧接口
-    "LongTermMemory",
-    "ShortTermMemory",
-    "CategorizedMemory",
-    "MemoryItem",
 ]

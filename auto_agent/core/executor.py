@@ -16,6 +16,19 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from auto_agent.core.context import ExecutionContext
+from auto_agent.llm.client import LLMClient
+from auto_agent.models import (
+    ExecutionPlan,
+    FailAction,
+    PlanStep,
+    SubTaskResult,
+    ValidationMode,
+)
+from auto_agent.retry.controller import RetryController
+from auto_agent.retry.models import ErrorRecoveryRecord, ErrorType, RetryConfig
+from auto_agent.tools.registry import ToolRegistry
+
 
 class PatternType(Enum):
     """执行模式类型"""
@@ -35,20 +48,6 @@ class ExecutionPattern:
     frequency: int
     success_rate: float
     suggested_optimization: Optional[str] = None
-
-
-from auto_agent.core.context import ExecutionContext
-from auto_agent.llm.client import LLMClient
-from auto_agent.models import (
-    ExecutionPlan,
-    FailAction,
-    PlanStep,
-    SubTaskResult,
-    ValidationMode,
-)
-from auto_agent.retry.controller import RetryController
-from auto_agent.retry.models import ErrorRecoveryRecord, ErrorType, RetryConfig
-from auto_agent.tools.registry import ToolRegistry
 
 
 class ExecutionEngine:

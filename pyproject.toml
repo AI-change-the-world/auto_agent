@@ -28,7 +28,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "black>=23.0",
-    "ruff>=0.1",
+    "ruff>=0.14.9",
 ]
 
 storage = ["aiosqlite>=0.19", "redis>=5.0"]

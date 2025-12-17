@@ -15,11 +15,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List
 
-from auto_agent import (
-    BaseTool,
-    ToolRegistry,
-    func_tool,
-)
+from auto_agent import BaseTool, ToolRegistry, func_tool
 from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
 
 # ============================================================

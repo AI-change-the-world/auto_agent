@@ -15,11 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from auto_agent import (
-    ToolRegistry,
-    func_tool,
-    get_global_registry,
-)
+from auto_agent import ToolRegistry, func_tool, get_global_registry
 from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
 
 # ============================================================
