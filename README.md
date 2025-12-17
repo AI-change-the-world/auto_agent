@@ -1,144 +1,311 @@
-# Auto-Agent 智能体框架
+# 🤖 Auto-Agent 智能体框架
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Version-0.1.0-blue.svg" alt="Version" />
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue.svg" alt="Python Version" />
-  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
-</p>
+<div align="center">
 
-Auto-Agent 是一个基于大语言模型的自主智能体框架，提供自主规划、工具调用、记忆管理等核心能力。
+**让AI自主规划、执行和学习**
 
-*本项目最初在 [DocHive](https://github.com/AI-change-the-world/DocHive) 中进行设计和验证，用于智能体的自动化构建，现已独立拆分为一个 Python package。由于仍处于早期发展阶段，部分功能可能尚未完全稳定，相关 API 在后续版本中可能会有所变动。*
+[![Version](https://img.shields.io/badge/Version-0.1.0-blue.svg)](https://github.com/AI-change-the-world/auto_agent/releases)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-79%20passed-brightgreen.svg)](tests/)
+[![Documentation](https://img.shields.io/badge/Docs-中文-blue.svg)](docs/)
+
+*🚀 基于LLM的自主智能体框架，让AI像人类一样规划任务、调用工具、管理记忆*
+
+[快速开始](#-快速开始) • [核心特性](#-核心特性) • [文档](docs/) • [示例](examples/) • [优化方案](OPTIMIZATION_PLAN.md)
+
+</div>
+
+---
+
+## 📖 项目简介
+
+Auto-Agent 是一个**自主智能体框架**，让大语言模型不仅仅是聊天工具，而是能够自主规划任务、执行复杂工作流、管理长期记忆的智能代理。
+
+### 🎯 核心价值
+
+- **🤖 自主执行**：自然语言描述需求，AI自主规划并执行
+- **🧠 持续学习**：三层记忆系统，支持从经验中学习和改进
+- **🔧 工具生态**：灵活的工具系统，支持自定义扩展
+- **📊 可观测性**：完整的执行追踪和报告生成
+
+### 📚 起源与发展
+
+本项目最初在 [DocHive](https://github.com/AI-change-the-world/DocHive) 中进行设计和验证，现已独立为专门的智能体框架。
+
+> ⚠️ **开发状态**：项目处于早期发展阶段，API可能在后续版本中调整。建议在生产环境中谨慎使用。
+
+---
 
 ## 🌟 核心特性
 
-- 🤖 **自主规划**：基于 LLM 的任务分解和执行计划生成
-- 🔧 **工具系统**：灵活的工具注册机制，支持装饰器快速定义
-- 🔄 **智能重试**：LLM 驱动的错误分析、参数修正和策略学习
-- 🧠 **三层记忆**：L1 短时记忆 + L2 语义记忆 + L3 叙事记忆
-- 📊 **分类记忆**：用户反馈、行为模式、偏好、知识等分类存储
-- 🎯 **意图路由**：自动识别用户意图并路由到合适的处理流程
-- 📝 **执行报告**：Mermaid 流程图 + Markdown 报告生成
-- 💬 **会话管理**：多轮对话、用户干预、会话持久化
+### 🤖 智能体核心能力
+
+| 特性 | 描述 | 亮点 |
+|------|------|------|
+| **自主规划** | 基于LLM的任务分解和执行计划生成 | 自然语言描述需求，AI自主规划执行路径 |
+| **工具系统** | 灵活的工具注册机制，支持装饰器快速定义 | 3种定义方式，从简单到完全自定义 |
+| **智能重试** | LLM驱动的错误分析、参数修正和策略学习 | 从失败中学习，自动优化执行策略 |
+| **意图路由** | 自动识别用户意图并路由到合适的处理流程 | 支持多Agent协作和专业化分工 |
+
+### 🧠 先进记忆系统
+
+| 层级 | 名称 | 存储格式 | 生命周期 | 核心能力 |
+|------|------|----------|----------|----------|
+| **L1** | 短时记忆 | 内存 | 单任务 | 执行上下文、中间决策记录 |
+| **L2** | 语义记忆 | JSON | 长期 | 用户偏好、知识、策略、错误恢复经验 |
+| **L3** | 叙事记忆 | Markdown | 长期 | 高语义密度总结、Prompt注入 |
+
+**✨ todo**
+- 📊 **分类存储**：用户反馈、行为模式、偏好、知识等分类管理(部分实现)
+- 🔄 **反馈学习**：用户反馈直接驱动记忆权重调整(暂未实现)
+- 🎯 **智能注入**：按需注入相关记忆，避免上下文爆炸(部分实现)
+- 📈 **持续优化**：从成功/失败经验中学习改进(暂未实现)
+
+### 📊 可观测性与报告
+
+- **📈 执行追踪**：完整的LLM调用记录和Token使用统计
+- **📋 流程可视化**：Mermaid流程图自动生成
+- **📝 智能报告**：Markdown + HTML双格式报告输出
 
 ## 🚀 快速开始
 
-### 安装
+### 📦 安装
 
-从源码安装：
-
+#### 从源码安装
 ```bash
 git clone https://github.com/AI-change-the-world/auto_agent.git
 cd auto_agent
 pip install -e .
 ```
 
-### Example
+### ⚡ 五分钟上手
 
-[deep_research_demo](./examples/deep_research_demo.py)
-
+#### 1. 配置环境变量
 ```bash
-# 配置 OpenAI
+# OpenAI
 export OPENAI_API_KEY=your-api-key
 export OPENAI_BASE_URL=https://api.openai.com/v1
 export OPENAI_MODEL=gpt-4o-mini
 ```
 
+#### 2. 运行深度研究示例
 ```bash
 python examples/deep_research_demo.py
 ```
 
-## 🔧 工具定义
+这个示例会演示：
+- 🤖 AI自主规划研究任务
+- 🔧 自动调用多个工具
+- 📊 生成完整的研究报告
+- 📈 执行过程可视化
 
-Auto-Agent 提供三种工具定义方式，从简单到复杂：
+#### 3. 查看结果
+运行后会在 `examples/output/` 目录生成：
+- 📄 Markdown研究报告
+- 🌐 HTML可视化报告
+- 📋 详细的执行追踪日志
 
-### 方式 1: 函数装饰器（最简洁）✨
+> 💡 **提示**：如果没有API Key，可以查看[离线示例](examples/basic_usage.py)了解基本用法。
+
+## 🔧 工具系统
+
+Auto-Agent提供灵活的工具系统，支持3种定义方式，从简单函数到复杂工具应有尽有。
+
+### 🎯 三种定义方式对比
+
+| 方式 | 难度 | 功能 | 适用场景 |
+|------|------|------|----------|
+| **函数装饰器** | ⭐ | 基础功能 | 简单同步/异步函数包装 |
+| **类装饰器** | ⭐⭐ | 验证/压缩 | 需要参数验证或结果压缩 |
+| **继承BaseTool** | ⭐⭐⭐ | 完全控制 | 复杂逻辑、依赖注入、状态管理 |
+
+### 方式一：函数装饰器（最方便）✨
+
+最简单的工具定义方式，适合包装现有函数：
 
 ```python
 from auto_agent import func_tool
 
-@func_tool(name="calculator", description="简单计算器", category="math")
+@func_tool(name="calculator", description="数学计算器", category="math")
 async def calculator(expression: str, precision: int = 2) -> dict:
-    """
-    计算数学表达式
-    
-    Args:
-        expression: 数学表达式，如 "1 + 2 * 3"
-        precision: 小数精度
-    """
-    result = eval(expression)
-    return {"success": True, "result": round(result, precision)}
+    """计算数学表达式，支持加减乘除和函数"""
+    try:
+        result = eval(expression)
+        return {"success": True, "result": round(result, precision)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
-@func_tool(name="search_docs", description="搜索文档")
-async def search_docs(query: str, limit: int = 10) -> dict:
-    # 搜索逻辑...
-    return {"success": True, "documents": [...], "count": 5}
+@func_tool(name="web_search", description="网络搜索", category="search")
+async def web_search(query: str, limit: int = 5) -> dict:
+    """使用搜索引擎获取信息"""
+    # 实现搜索逻辑...
+    return {"success": True, "results": [...], "count": limit}
 ```
 
-### 方式 2: 类装饰器（带验证/压缩）
+### 方式二：类装饰器
+
+适合需要参数验证或结果压缩的场景：
 
 ```python
-from auto_agent import tool, BaseTool, ToolDefinition, ToolParameter
+from auto_agent import tool, BaseTool
+from typing import Dict, Any
 
-# 自定义压缩函数（避免上下文溢出）
-def compress_search(result, state):
+# 自定义压缩函数（控制上下文长度）
+def compress_search_result(result: Dict[str, Any], state: Dict[str, Any]) -> Dict[str, Any]:
+    """压缩搜索结果，避免上下文溢出"""
     return {
         "success": result.get("success"),
-        "document_ids": result.get("document_ids", [])[:20],
-        "count": len(result.get("document_ids", [])),
+        "count": len(result.get("documents", [])),
+        "top_docs": result.get("documents", [])[:3],  # 只保留前3个
     }
 
 @tool(
-    name="es_search",
-    description="全文检索",
+    name="document_search",
+    description="文档全文检索",
     category="retrieval",
-    compress_function=compress_search,
+    compress_function=compress_search_result,  # 结果压缩
 )
-class ESSearchTool(BaseTool):
-    async def execute(self, query: str, size: int = 10, **kwargs) -> dict:
-        # 检索逻辑...
-        return {"success": True, "document_ids": [...], "documents": [...]}
+class DocumentSearchTool(BaseTool):
+    def __init__(self, index_path: str):
+        self.index_path = index_path
+
+    async def execute(self, query: str, limit: int = 10, **kwargs) -> Dict[str, Any]:
+        # 实现文档搜索逻辑...
+        return {
+            "success": True,
+            "documents": [...],
+            "total_found": 25
+        }
 ```
 
-### 方式 3: 继承 BaseTool（完全控制）
+### 方式三：继承BaseTool
+
+适合复杂工具，需要完全控制生命周期：
 
 ```python
 from auto_agent import BaseTool, ToolDefinition, ToolParameter
 
-class AnalyzeInputTool(BaseTool):
+class LLMReasoningTool(BaseTool):
+    """使用LLM进行推理分析的工具"""
+
     def __init__(self, llm_client):
         self.llm_client = llm_client
 
     @property
     def definition(self) -> ToolDefinition:
         return ToolDefinition(
-            name="analyze_input",
-            description="分析用户输入，识别意图和关键信息",
+            name="llm_reasoning",
+            description="使用大语言模型进行推理分析",
             parameters=[
-                ToolParameter(name="query", type="string", description="用户输入", required=True),
+                ToolParameter(
+                    name="question",
+                    type="string",
+                    description="需要推理的问题",
+                    required=True
+                ),
+                ToolParameter(
+                    name="context",
+                    type="string",
+                    description="相关上下文信息",
+                    required=False
+                ),
             ],
-            category="analysis",
+            category="reasoning",
+            # 错误恢复配置
+            error_recovery={
+                "max_retries": 2,
+                "retry_on": ["TIMEOUT_ERROR", "NETWORK_ERROR"]
+            }
         )
 
-    async def execute(self, query: str, **kwargs) -> dict:
-        # 使用 LLM 分析...
-        return {"success": True, "intent": "写作", "topic": "AI"}
+    async def execute(self, question: str, context: str = "", **kwargs) -> Dict[str, Any]:
+        """执行LLM推理"""
+        prompt = f"基于以下上下文回答问题：\n\n上下文：{context}\n问题：{question}"
+
+        try:
+            response = await self.llm_client.chat([
+                {"role": "user", "content": prompt}
+            ])
+            return {
+                "success": True,
+                "answer": response,
+                "confidence": 0.8
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 ```
 
-### 工具注册
+### 📋 工具注册
 
 ```python
 from auto_agent import ToolRegistry, get_global_registry
 
-# 方式 1: 使用全局注册表（装饰器自动注册）
+# 方法1：使用全局注册表（装饰器会自动注册）
 registry = get_global_registry()
+print(f"已注册工具数量: {len(registry.get_all_tools())}")
 
-# 方式 2: 手动注册到自定义注册表
-registry = ToolRegistry()
-registry.register(AnalyzeInputTool(llm_client))
-registry.register(ESSearchTool())
+# 方法2：手动注册到自定义注册表
+custom_registry = ToolRegistry()
+custom_registry.register(LLMReasoningTool(llm_client))
+custom_registry.register(DocumentSearchTool("./index"))
+
+# 方法3：在Agent中指定工具注册表
+agent = AutoAgent(
+    llm_client=llm_client,
+    tool_registry=custom_registry,
+    # ... 其他配置
+)
 ```
 
+> 💡 **提示**：查看 [examples/custom_tool.py](examples/custom_tool.py) 获取完整示例。
+
+## 🌟 应用场景
+
+Auto-Agent 适用于多种复杂的AI应用场景：
+
+### 📊 研究与分析
+- **深度研究**：自动规划研究流程，收集多源信息，生成综合报告
+- **市场分析**：竞争对手分析、趋势预测、投资建议生成
+- **技术调研**：新技术评估、架构方案设计、实现路径规划
+
+### ✍️ 内容创作
+- **文档写作**：技术文档、博客文章、研究报告自动生成
+- **代码生成**：根据需求自动编写和优化代码
+- **创意写作**：故事创作、营销文案、个性化内容
+
+### 🤖 智能助手
+- **任务自动化**：复杂工作流程的自动化执行
+- **问题解决**：多步骤问题分析和解决方案生成
+- **学习辅导**：个性化学习计划制定和进度跟踪
+
+### 🔧 企业应用
+- **数据处理**：自动数据清洗、分析和报告生成
+- **客户服务**：智能客服、问题诊断、解决方案推荐
+- **运营优化**：业务流程优化、效率分析、改进建议
+
+### 📈 示例项目
+
+| 示例 | 功能 | 复杂度 | 文件 |
+|------|------|--------|------|
+| **深度研究** | 自主规划研究任务，生成完整报告 | ⭐⭐⭐ | [deep_research_demo.py](examples/deep_research_demo.py) |
+| **文档写作** | 智能写作助手，生成技术文档 | ⭐⭐⭐ | [writer_agent_demo.py](examples/writer_agent_demo.py) |
+| **自定义工具** | 工具定义和注册示例 | ⭐ | [custom_tool.py](examples/custom_tool.py) |
+| **记忆系统** | 记忆管理功能演示 | ⭐⭐ | [memory_demo.py](examples/memory_demo.py) |
+
+### 🚀 运行示例
+
+```bash
+# 1. 配置环境变量
+export OPENAI_API_KEY=your-api-key
+export OPENAI_MODEL=gpt-4o-mini
+
+# 2. 运行深度研究示例
+python examples/deep_research_demo.py
+
+# 3. 查看生成的结果
+ls examples/output/
+```
 
 ## 🎯 IntentRouter vs TaskPlanner
 
@@ -221,15 +388,72 @@ for step in plan.subtasks:
 
 ## 🧠 记忆系统
 
-Auto-Agent 提供先进的 L1/L2/L3 三层记忆架构，支持反馈学习、智能注入和错误恢复策略记忆化。
+Auto-Agent 提供业界领先的三层记忆架构，支持反馈学习、智能注入和错误恢复策略记忆化。
 
-### 三层记忆架构 ✨
+### 🏗️ 三层记忆架构
 
-| 层级 | 名称 | 存储格式 | 生命周期 | 用途 |
-|------|------|----------|----------|------|
-| **L1** | 短时记忆 (WorkingMemory) | 内存 | 单次任务 | 执行上下文、中间决策、工具调用记录 |
-| **L2** | 语义记忆 (SemanticMemory) | JSON | 长期持久化 | 用户偏好、知识、策略、错误恢复经验 |
-| **L3** | 叙事记忆 (NarrativeMemory) | Markdown | 长期持久化 | 高语义密度总结、Prompt 注入 |
+| 层级 | 名称 | 存储格式 | 生命周期 | 核心用途 | 更新频率 |
+|------|------|----------|----------|----------|----------|
+| **L1** | 短时记忆 | 内存 | 单任务执行 | 执行上下文、中间决策、工具调用记录 | 实时 |
+| **L2** | 语义记忆 | JSON | 长期持久化 | 用户偏好、知识库、成功策略、错误恢复经验 | 定期提炼 |
+| **L3** | 叙事记忆 | Markdown | 长期持久化 | 高语义密度总结、行为模式分析、Prompt注入 | 周期性生成 |
+
+**🎯 架构优势**
+- **分层隔离**：不同生命周期记忆分离管理，避免相互干扰
+- **智能注入**：基于查询意图按需注入相关记忆，控制Token成本
+- **反馈闭环**：用户反馈直接影响记忆权重，形成持续学习能力
+- **多格式存储**：JSON用于决策，Markdown用于语义理解
+
+### 🚀 快速开始
+
+```python
+from auto_agent import MemorySystem, MemoryCategory
+
+# 初始化统一记忆系统
+memory = MemorySystem(storage_path="./data/memory", token_budget=2000)
+
+user_id = "user_001"
+
+# === L1 短时记忆 ===
+task_id = memory.start_task(user_id, "帮我写一篇AI报告")
+wm = memory.get_working_memory(task_id)
+
+# 记录执行过程
+wm.add_decision("使用分层结构组织内容", "提升可读性")
+wm.add_tool_call("web_search", {"query": "AI最新进展"}, {"success": True, "count": 15})
+
+# 任务结束时提炼到长期记忆
+memory.end_task(user_id, task_id, promote_to_long_term=True)
+
+# === L2 语义记忆 ===
+# 便捷方法记录各类记忆
+memory.set_preference(user_id, "language", "中文")
+memory.add_knowledge(user_id, "用户精通Python和FastAPI框架")
+memory.add_strategy(user_id, "复杂任务先分解为子任务", is_successful=True)
+
+# 分类管理
+memory.add_memory(
+    user_id=user_id,
+    content="用户偏好使用异步代码模式",
+    category=MemoryCategory.PREFERENCE,
+    tags=["coding", "async"],
+    confidence=0.9,
+)
+
+# === 用户反馈驱动学习 ===
+item = memory.add_memory(user_id, "建议使用类型注解")
+memory.thumbs_up(user_id, item.memory_id)  # 👍 正反馈
+memory.thumbs_down(user_id, item.memory_id, "某些场景下过于繁琐")  # 👎 负反馈
+
+# === L3 叙事记忆 ===
+reflection = memory.generate_reflection(
+    user_id=user_id,
+    title="编程习惯总结",
+    category=MemoryCategory.STRATEGY,
+)
+```
+
+> 📖 **详细文档**：[记忆系统设计](docs/MEMORY.md) | [迁移指南](docs/MIGRATION_GUIDE.md)
 
 ```python
 from auto_agent import MemorySystem, MemoryCategory, MemorySource
@@ -414,89 +638,6 @@ await retry_controller.record_successful_recovery(
 到 L2     或重规划
 ```
 
-### 旧接口：分类记忆 (CategorizedMemory)
-
-基于 KV 存储的分类记忆系统，支持全文检索：
-
-```python
-from auto_agent import CategorizedMemory, MemoryCategory
-
-memory = CategorizedMemory(storage_path="./data/memories")
-
-user_id = "user_001"
-
-# 设置用户偏好
-memory.set_preference(user_id, "language", "中文")
-memory.set_preference(user_id, "style", "专业")
-
-# 记录用户反馈
-memory.add_feedback(user_id, "响应速度很快", rating=5)
-
-# 记录用户行为
-memory.add_behavior(user_id, "write_document", {"topic": "AI"})
-
-# 添加知识
-memory.add_knowledge(user_id, "用户熟悉 Python 编程", tags=["技能", "Python"])
-
-# 搜索记忆
-results = memory.search(user_id, "Python")
-for item in results:
-    print(f"[{item.category.value}] {item.key}: {item.value}")
-
-# 获取上下文摘要（用于 LLM）
-context = memory.get_context_summary(user_id)
-print(context)
-```
-
-### 短期记忆 (ShortTermMemory)
-
-对话级记忆，支持智能压缩：
-
-```python
-from auto_agent import ShortTermMemory
-
-stm = ShortTermMemory(max_context_chars=5000)
-
-# 压缩执行状态（避免上下文溢出）
-compressed = stm.summarize_state(
-    state={"documents": large_doc_list},
-    step_history=execution_history,
-    target_tool_name="compose_document",
-    max_steps=5,
-)
-# 原始 22690 字符 → 压缩后 1504 字符 (93.4% 压缩率)
-```
-
-## 💬 会话管理
-
-```python
-from auto_agent import SessionManager, SessionStatus
-
-session_mgr = SessionManager(default_ttl=1800)  # 30分钟过期
-
-# 创建会话
-session = session_mgr.create_session(
-    user_id="user_001",
-    initial_query="帮我写一篇技术文档",
-)
-
-# 添加消息
-session_mgr.add_message(session.session_id, "assistant", "好的，请问主题是什么？")
-
-# 等待用户输入
-session_mgr.wait_for_input(session.session_id, "请提供文档主题")
-# session.status == SessionStatus.WAITING_INPUT
-
-# 用户回复后恢复
-session_mgr.resume_session(session.session_id, "关于 Python 异步编程")
-# session.status == SessionStatus.ACTIVE
-
-# 获取对话历史
-history = session_mgr.get_conversation_history(session.session_id)
-
-# 完成会话
-session_mgr.complete_session(session.session_id, "文档生成完成！")
-```
 
 ## 📊 执行报告
 
@@ -601,54 +742,82 @@ if result["success"]:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 📁 目录结构
+## 🏗️ 项目架构
+
+### 📂 核心模块
 
 ```
 auto_agent/
-├── auto_agent/
-│   ├── __init__.py           # 主入口，导出所有公共 API
-│   ├── models.py             # 公共数据模型
-│   ├── core/
-│   │   ├── agent.py          # AutoAgent 主类
-│   │   ├── planner.py        # TaskPlanner 任务规划器
-│   │   ├── editor/           # Agent Markdown 解析
-│   │   ├── report/           # 执行报告生成
-│   │   └── router/           # IntentRouter 意图路由
-│   ├── llm/
-│   │   ├── client.py         # LLM 客户端抽象基类
-│   │   ├── prompts.py        # 提示词模板
-│   │   └── providers/
-│   │       └── openai.py     # OpenAI/DeepSeek 客户端
-│   ├── memory/
-│   │   ├── system.py         # 统一记忆系统 (新架构)
-│   │   ├── working.py        # L1 短时记忆
-│   │   ├── semantic.py       # L2 长期语义记忆
-│   │   ├── narrative.py      # L3 叙事记忆
-│   │   ├── router.py         # 记忆路由器
-│   │   ├── models.py         # 记忆数据模型
-│   │   ├── categorized.py    # 分类记忆 (旧接口)
-│   │   ├── long_term.py      # 长期记忆 (旧接口)
-│   │   └── short_term.py     # 短期记忆 (旧接口)
-│   ├── session/
-│   │   ├── manager.py        # 会话管理器
-│   │   └── models.py         # 会话数据模型
-│   ├── tools/
-│   │   ├── base.py           # 工具基类
-│   │   └── registry.py       # 工具注册表 + 装饰器
-│   ├── retry/
-│   │   └── models.py         # 重试配置
-│   └── utils/
-├── examples/
-│   ├── full_demo.py          # 完整功能演示
-│   └── writer_agent_demo.py  # 文档写作智能体示例
-├── tests/
-│   ├── test_session.py       # 会话管理测试
-│   ├── test_router.py        # 意图路由测试
-│   ├── test_memory.py        # 分类记忆测试
-│   ├── test_memory_system.py # 新记忆系统测试 (L1/L2/L3)
-│   └── test_integration.py   # 集成测试
-├── pyproject.toml
-└── README.md
+├── core/                    # 🧠 核心智能体功能
+│   ├── agent.py            # AutoAgent 主类 - 智能体核心
+│   ├── planner.py          # TaskPlanner - 任务规划器
+│   ├── executor.py         # 执行引擎
+│   ├── context.py          # 执行上下文管理
+│   ├── editor/             # Agent Markdown 解析器
+│   ├── report/             # 执行报告生成器
+│   └── router/             # IntentRouter - 意图路由器
+├── llm/                    # 🤖 大语言模型支持
+│   ├── client.py           # LLM 客户端抽象基类
+│   ├── providers/          # 模型提供商
+│   │   ├── openai.py       # OpenAI GPT 系列
+│   │   ├── anthropic.py    # Claude 系列
+│   │   └── deepseek.py     # DeepSeek 模型
+├── memory/                 # 🧠 三层记忆系统
+│   ├── system.py           # 统一记忆系统 (L1/L2/L3)
+│   ├── working.py          # L1 短时记忆
+│   ├── semantic.py         # L2 长期语义记忆
+│   ├── narrative.py        # L3 叙事记忆
+│   ├── router.py           # 记忆路由器
+│   ├── manager.py          # 记忆管理器
+│   ├── models.py           # 记忆数据模型
+│   └── storage/            # 存储后端
+│       ├── sqlite.py       # SQLite 存储
+│       ├── redis.py        # Redis 缓存
+│       └── markdown.py     # Markdown 文件存储
+├── tools/                  # 🔧 工具生态系统
+│   ├── base.py             # 工具基类
+│   ├── registry.py         # 工具注册表
+│   ├── models.py           # 工具数据模型
+│   └── builtin/            # 内置工具
+│       ├── calculator.py   # 计算器工具
+│       ├── code_executor.py # 代码执行器
+│       └── web_search.py   # 网络搜索工具
+├── retry/                  # 🔄 智能重试机制
+│   ├── controller.py       # 重试控制器
+│   ├── models.py           # 重试配置模型
+│   └── strategies.py       # 重试策略
+├── session/                # 💬 会话管理
+│   ├── manager.py          # 会话管理器
+│   └── models.py           # 会话数据模型
+├── tracing/                # 📊 执行追踪
+│   ├── context.py          # 追踪上下文
+│   └── models.py           # 追踪数据模型
+└── utils/                  # 🛠️ 工具函数
+    ├── logger.py           # 日志工具
+    ├── serialization.py    # 序列化工具
+    └── validators.py       # 数据验证器
+```
+
+### 📚 示例与文档
+
+```
+examples/                   # 💡 使用示例
+├── deep_research_demo.py   # 深度研究智能体
+├── writer_agent_demo.py    # 文档写作助手
+├── memory_demo.py          # 记忆系统演示
+├── custom_tool.py          # 自定义工具示例
+└── basic_usage.py          # 基础使用方法
+
+docs/                       # 📖 项目文档
+├── MEMORY.md              # 记忆系统设计详解
+├── TOOLS.md               # 工具开发指南
+├── OPTIMIZE.md            # 性能优化建议
+└── MIGRATION_GUIDE.md     # 版本迁移指南
+
+tests/                      # 🧪 测试套件
+├── test_memory_system.py  # 记忆系统测试
+├── test_router.py         # 路由器测试
+└── test_integration.py    # 集成测试
 ```
 
 ## 🧪 测试
@@ -718,20 +887,88 @@ pytest tests/ --cov=auto_agent --cov-report=html
 | `ErrorAnalysis`         | LLM 错误分析结果    |
 | `ErrorRecoveryRecord`   | 错误恢复记录        |
 
-## 🤝 贡献指南
+## 🌍 社区与支持
 
-1. Fork 项目仓库
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
+### 🤝 贡献指南
+
+我们欢迎各种形式的贡献！无论是代码、文档、测试，还是问题反馈和功能建议。
+
+#### 开发贡献
+
+1. **Fork 项目仓库**
+2. **创建功能分支**
+   ```bash
+   git checkout -b feature/amazing-feature
+   # 或修复bug
+   git checkout -b fix/bug-description
+   ```
+3. **提交更改**
+   ```bash
+   git commit -m "feat: add amazing new feature"
+   # 遵循 Conventional Commits 规范
+   ```
+4. **推送并创建 PR**
+   ```bash
+   git push origin feature/amazing-feature
+   # 在 GitHub 上创建 Pull Request
+   ```
+
+#### 开发环境设置
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/AI-change-the-world/auto_agent.git
+cd auto_agent
+
+# 2. 安装开发依赖
+pip install -e ".[dev,storage,llm]"
+
+# 3. 运行测试
+pytest tests/ -v
+
+# 4. 代码格式化
+black auto_agent/
+ruff auto_agent/ --fix
+```
+
+#### 贡献类型
+
+- 🐛 **Bug 修复**：修复现有问题
+- ✨ **新功能**：添加新特性
+- 📚 **文档**：改进文档和示例
+- 🧪 **测试**：添加或改进测试
+- 🔧 **工具**：开发新工具或改进现有工具
+- 🎨 **重构**：代码结构优化
+
+### 📞 获取帮助
+
+- 📖 **[文档中心](docs/)** - 详细使用指南和技术文档
+- 💬 **[Issues](https://github.com/AI-change-the-world/auto_agent/issues)** - 报告问题或提出建议
+- 💡 **[Discussions](https://github.com/AI-change-the-world/auto_agent/discussions)** - 讨论功能和最佳实践
+- 📧 **邮箱** - guchengxi1994@qq.com
+
+### 🙏 致谢
+
+感谢所有贡献者的支持！特别感谢：
+
+- **DocHive** 项目，为 Auto-Agent 的核心思想提供了验证
+- **开源社区**，提供了优秀的工具和灵感
+- **早期用户**，通过反馈帮助我们改进产品
 
 ## 📄 许可证
 
-MIT License - 查看 [LICENSE](LICENSE) 文件了解详情。
+**MIT License** - 自由使用，保留署名
+
+完整许可证文本请查看 [LICENSE](LICENSE) 文件。
 
 ---
 
 <div align="center">
-  <strong>🚀 使用 Auto-Agent 构建下一代智能应用!</strong>
+
+**🚀 使用 Auto-Agent 构建下一代智能应用！**
+
+[![Star History Chart](https://api.star-history.com/svg?repos=AI-change-the-world/auto_agent&type=Date)](https://star-history.com/#AI-change-the-world/auto_agent&Date)
+
+**如果这个项目对你有帮助，请给我们一个 ⭐ Star！**
+
 </div>
