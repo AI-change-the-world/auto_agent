@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/Version-0.1.0-blue.svg)](https://github.com/AI-change-the-world/auto_agent/releases)
 [![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-79%20passed-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/Tests-pytest-blue.svg)](tests/)
 [![Documentation](https://img.shields.io/badge/Docs-中文-blue.svg)](docs/)
 
 *🚀 基于LLM的自主智能体框架，让AI像人类一样规划任务、调用工具、管理记忆*
@@ -46,7 +46,7 @@ Auto-Agent 是一个**自主智能体框架**，让大语言模型不仅仅是�
 | **自主规划** | 基于LLM的任务分解和执行计划生成 | 自然语言描述需求，AI自主规划执行路径 |
 | **工具系统** | 灵活的工具注册机制，支持装饰器快速定义 | 3种定义方式，从简单到完全自定义 |
 | **智能重试** | LLM驱动的错误分析、参数修正和策略学习 | 从失败中学习，自动优化执行策略 |
-| **意图路由** | 自动识别用户意图并路由到合适的处理流程 | 支持多Agent协作和专业化分工 |
+| **意图路由** | 自动识别用户意图并路由到合适的 Handler/流程 | 支持多处理器扩展（可逐步演进为多Agent） |
 
 ### 🧠 先进记忆系统
 
@@ -56,11 +56,11 @@ Auto-Agent 是一个**自主智能体框架**，让大语言模型不仅仅是�
 | **L2** | 语义记忆 | JSON | 长期 | 用户偏好、知识、策略、错误恢复经验 |
 | **L3** | 叙事记忆 | Markdown | 长期 | 高语义密度总结、Prompt注入 |
 
-**✨ todo**
-- 📊 **分类存储**：用户反馈、行为模式、偏好、知识等分类管理(部分实现)
-- 🔄 **反馈学习**：用户反馈直接驱动记忆权重调整(暂未实现)
-- 🎯 **智能注入**：按需注入相关记忆，避免上下文爆炸(部分实现)
-- 📈 **持续优化**：从成功/失败经验中学习改进(暂未实现)
+**实现状态**
+- **📊 分类存储**：已实现（`category/subcategory/tags`）
+- **🔄 反馈学习**：已实现（`reward/confidence/needs_revision`）
+- **🎯 智能注入**：已实现（`MemoryRouter` + `token_budget`；可选 LLM 总结）
+- **📈 持续优化**：部分实现（L1→L2 提炼、错误恢复策略记忆化）
 
 ### 📊 可观测性与报告
 
@@ -106,7 +106,7 @@ python examples/deep_research_demo.py
 - 🌐 HTML可视化报告
 - 📋 详细的执行追踪日志
 
-> 💡 **提示**：如果没有API Key，可以查看[离线示例](examples/basic_usage.py)了解基本用法。
+> 💡 **提示**：如果暂时没有 API Key，可以先看无需调用 LLM 的示例：[custom_tool.py](examples/custom_tool.py)，以及记忆系统示例：[memory_demo.py](examples/memory_demo.py)。
 
 ## 🔧 工具系统
 
@@ -289,7 +289,7 @@ Auto-Agent 适用于多种复杂的AI应用场景：
 | 示例 | 功能 | 复杂度 | 文件 |
 |------|------|--------|------|
 | **深度研究** | 自主规划研究任务，生成完整报告 | ⭐⭐⭐ | [deep_research_demo.py](examples/deep_research_demo.py) |
-| **文档写作** | 智能写作助手，生成技术文档 | ⭐⭐⭐ | [writer_agent_demo.py](examples/writer_agent_demo.py) |
+| **工作流演示** | Markdown 定义 Agent → 执行 → 生成可视化报告 | ⭐⭐⭐ | [workflow_demo.py](examples/workflow_demo.py) |
 | **自定义工具** | 工具定义和注册示例 | ⭐ | [custom_tool.py](examples/custom_tool.py) |
 | **记忆系统** | 记忆管理功能演示 | ⭐⭐ | [memory_demo.py](examples/memory_demo.py) |
 
@@ -388,7 +388,7 @@ for step in plan.subtasks:
 
 ## 🧠 记忆系统
 
-Auto-Agent 提供业界领先的三层记忆架构，支持反馈学习、智能注入和错误恢复策略记忆化。
+Auto-Agent 提供三层记忆架构，支持反馈学习、智能注入和错误恢复策略记忆化。
 
 ### 🏗️ 三层记忆架构
 
@@ -445,77 +445,13 @@ item = memory.add_memory(user_id, "建议使用类型注解")
 memory.thumbs_up(user_id, item.memory_id)  # 👍 正反馈
 memory.thumbs_down(user_id, item.memory_id, "某些场景下过于繁琐")  # 👎 负反馈
 
-# === L3 叙事记忆 ===
-reflection = memory.generate_reflection(
-    user_id=user_id,
-    title="编程习惯总结",
-    category=MemoryCategory.STRATEGY,
-)
+# === 智能记忆注入（同步）===
+ctx = memory.get_context_for_query(user_id, "帮我写一个 Web 应用")
+print(ctx["context"])
 ```
 
 > 📖 **详细文档**：[记忆系统设计](docs/MEMORY.md) | [迁移指南](docs/MIGRATION_GUIDE.md)
-
-```python
-from auto_agent import MemorySystem, MemoryCategory, MemorySource
-
-# 初始化统一记忆系统
-memory = MemorySystem(storage_path="./data/memory", token_budget=2000)
-
-user_id = "user_001"
-
-# === L1 短时记忆 (WorkingMemory) ===
-# 单次任务执行上下文，任务结束后可提炼到长期记忆
-task_id = memory.start_task(user_id, "帮我写一篇AI报告")
-wm = memory.get_working_memory(task_id)
-wm.add_decision("使用分层结构", "更易阅读")
-wm.add_tool_call("search", {"query": "AI"}, {"success": True, "count": 10}, step_id="s1")
-# 任务结束，提炼到长期记忆
-memory.end_task(user_id, task_id, promote_to_long_term=True)
-
-# === L2 长期语义记忆 (SemanticMemory) ===
-# JSON 结构化，支持分类、标签、打分、时间衰减
-
-# 添加记忆
-memory.add_memory(
-    user_id=user_id,
-    content="用户偏好简洁的代码风格",
-    category=MemoryCategory.PREFERENCE,
-    tags=["code", "style"],
-    confidence=0.8,
-)
-
-# 便捷方法
-memory.set_preference(user_id, "language", "Python")
-memory.add_knowledge(user_id, "用户熟悉 FastAPI 框架")
-memory.add_strategy(user_id, "先写测试再写代码", is_successful=True)
-
-# 搜索记忆
-results = memory.search_memory(user_id, "Python")
-
-# === 用户反馈驱动学习 ===
-item = memory.add_memory(user_id, "建议使用 async/await")
-
-# 👍 正反馈：提升 confidence 和 reward
-memory.thumbs_up(user_id, item.memory_id)
-
-# 👎 负反馈：降低权重，标记需要修订
-memory.thumbs_down(user_id, item.memory_id, reason="不适用于同步场景")
-
-# === 智能记忆注入 ===
-# 根据查询自动路由和注入相关记忆
-result = memory.get_context_for_query(user_id, "帮我写一个 Python API")
-print(result["context"])  # 注入到 Prompt 的文本
-print(result["token_estimate"])  # 估计 token 数
-print(result["analysis"])  # 查询分析结果
-
-# === L3 叙事记忆 (NarrativeMemory) ===
-# Markdown 格式，高语义密度，用于 Prompt 注入
-reflection = memory.generate_reflection(
-    user_id=user_id,
-    title="编码经验总结",
-    category=MemoryCategory.STRATEGY,
-)
-```
+> 💡 更完整的记忆系统演示请看：`examples/memory_demo.py`
 
 #### 记忆路由器 (MemoryRouter)
 
@@ -786,9 +722,6 @@ auto_agent/
 │   ├── controller.py       # 重试控制器
 │   ├── models.py           # 重试配置模型
 │   └── strategies.py       # 重试策略
-├── session/                # 💬 会话管理
-│   ├── manager.py          # 会话管理器
-│   └── models.py           # 会话数据模型
 ├── tracing/                # 📊 执行追踪
 │   ├── context.py          # 追踪上下文
 │   └── models.py           # 追踪数据模型
@@ -803,10 +736,10 @@ auto_agent/
 ```
 examples/                   # 💡 使用示例
 ├── deep_research_demo.py   # 深度研究智能体
-├── writer_agent_demo.py    # 文档写作助手
+├── workflow_demo.py        # 工作流演示（Markdown → 执行 → 报告）
 ├── memory_demo.py          # 记忆系统演示
 ├── custom_tool.py          # 自定义工具示例
-└── basic_usage.py          # 基础使用方法
+└── output/                 # 示例输出（Markdown/HTML 报告）
 
 docs/                       # 📖 项目文档
 ├── MEMORY.md              # 记忆系统设计详解
@@ -833,7 +766,7 @@ pytest tests/test_memory.py -v
 pytest tests/ --cov=auto_agent --cov-report=html
 ```
 
-当前测试覆盖：79 个测试用例全部通过。
+> 💡 提示：请以你本地/CI 实际运行的 `pytest` 结果为准（避免 README 中的固定数字过期）。
 
 ## 📦 API 参考
 
@@ -847,15 +780,12 @@ pytest tests/ --cov=auto_agent --cov-report=html
 | `BaseTool`                 | 工具基类                   |
 | `IntentRouter`             | 意图路由器                 |
 | `TaskPlanner`              | 任务规划器                 |
-| `SessionManager`           | 会话管理器                 |
 | `MemorySystem`             | 统一记忆系统 (L1/L2/L3)    |
 | `WorkingMemory`            | L1 短时记忆                |
 | `SemanticMemory`           | L2 长期语义记忆            |
 | `NarrativeMemoryManager`   | L3 叙事记忆                |
 | `MemoryRouter`             | 记忆路由器                 |
 | `RetryController`          | 智能重试控制器             |
-| `CategorizedMemory`        | 分类记忆系统 (旧接口)      |
-| `ShortTermMemory`          | 短期记忆 (旧接口)          |
 | `ExecutionReportGenerator` | 执行报告生成器             |
 | `AgentMarkdownParser`      | Agent Markdown 解析器      |
 
