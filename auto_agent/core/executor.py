@@ -367,35 +367,25 @@ class ExecutionEngine:
                     error=result.error,
                 )
 
-                # 提取工作记忆（阶段二：对于高影响力工具或复杂任务）
-                # 注册一致性检查点（阶段三：对于高影响力工具）
-                if result.success and execution_strategy:
-                    should_extract = False
-                    should_register_checkpoint = False
-                    # 检查工具级策略
-                    tool = self.tool_registry.get_tool(subtask.tool) if subtask.tool else None
-                    if tool and hasattr(tool, "definition") and tool.definition.replan_policy:
-                        policy = tool.definition.replan_policy
-                        if policy.high_impact:
-                            should_extract = True
-                            should_register_checkpoint = True
-                        # 检查是否需要一致性检查
-                        if policy.requires_consistency_check:
-                            should_register_checkpoint = True
-                    # 检查全局策略（PROJECT 级别总是提取）
-                    if execution_strategy.require_phase_review:
-                        should_extract = True
-                        should_register_checkpoint = True
-                    
-                    if should_extract and self.llm_client:
+                # 应用统一后处理策略
+                if result.success:
+                    post_result = await self._apply_post_policy(
+                        step=subtask,
+                        result=result,
+                        state=state,
+                        execution_strategy=execution_strategy,
+                    )
+
+                    # 提取工作记忆
+                    if post_result["should_extract_memory"] and self.llm_client:
                         await self._extract_working_memory(
                             step=subtask,
                             result=result,
                             state=state,
                         )
-                    
-                    # 注册一致性检查点（阶段三新增）
-                    if should_register_checkpoint and self.llm_client:
+
+                    # 注册一致性检查点
+                    if post_result["should_register_checkpoint"] and self.llm_client:
                         await self._register_consistency_checkpoint(
                             step=subtask,
                             result=result,
@@ -2859,3 +2849,138 @@ class ExecutionEngine:
                 # 应用 state_mapping（如果有映射则用映射后的 key，否则用原 key）
                 target_key = state_mapping.get(key, key)
                 state[target_key] = result[key]
+
+    # ==================== 统一后处理机制 ====================
+
+    async def _apply_post_policy(
+        self,
+        step: PlanStep,
+        result: SubTaskResult,
+        state: Dict[str, Any],
+        execution_strategy: Optional[ExecutionStrategy],
+    ) -> Dict[str, Any]:
+        """
+        应用统一的后处理策略
+
+        三阶段处理流程：
+        1. ValidationConfig: 验证结果
+        2. PostSuccessConfig: 通过后检查（一致性、replan 条件）
+        3. ResultHandlingConfig: 结果处理（压缩、缓存、检查点）
+
+        Args:
+            step: 执行的步骤
+            result: 执行结果
+            state: 当前状态
+            execution_strategy: 全局执行策略
+
+        Returns:
+            处理结果，包含：
+            - should_extract_memory: 是否需要提取工作记忆
+            - should_register_checkpoint: 是否需要注册检查点
+            - checkpoint_type: 检查点类型
+            - compressed_result: 压缩后的结果（如果有）
+        """
+        from auto_agent.models import ToolPostPolicy
+
+        post_result = {
+            "should_extract_memory": False,
+            "should_register_checkpoint": False,
+            "checkpoint_type": None,
+            "compressed_result": None,
+        }
+
+        if not result.success:
+            return post_result
+
+        # 获取工具的后处理策略
+        tool = self.tool_registry.get_tool(step.tool) if step.tool else None
+        post_policy: Optional[ToolPostPolicy] = None
+
+        if tool and hasattr(tool, "definition"):
+            post_policy = tool.definition.get_effective_post_policy()
+
+        # 如果没有后处理策略，使用全局策略决定
+        if not post_policy or (
+            not post_policy.validation
+            and not post_policy.post_success
+            and not post_policy.result_handling
+        ):
+            # 使用全局策略
+            if execution_strategy and execution_strategy.require_phase_review:
+                post_result["should_extract_memory"] = True
+                post_result["should_register_checkpoint"] = True
+            return post_result
+
+        # === 第二阶段：PostSuccessConfig ===
+        if post_policy.post_success:
+            ps_config = post_policy.post_success
+
+            # 高影响力工具
+            if ps_config.high_impact:
+                post_result["should_extract_memory"] = True
+                post_result["should_register_checkpoint"] = True
+
+            # 需要一致性检查
+            if ps_config.requires_consistency_check:
+                post_result["should_register_checkpoint"] = True
+
+            # 需要提取工作记忆
+            if ps_config.extract_working_memory:
+                post_result["should_extract_memory"] = True
+
+        # === 第三阶段：ResultHandlingConfig ===
+        if post_policy.result_handling:
+            rh_config = post_policy.result_handling
+
+            # 注册为检查点
+            if rh_config.register_as_checkpoint:
+                post_result["should_register_checkpoint"] = True
+                post_result["checkpoint_type"] = rh_config.checkpoint_type
+
+            # 压缩结果
+            if rh_config.compress_function and result.output:
+                try:
+                    compressed = rh_config.compress_function(result.output, state)
+                    post_result["compressed_result"] = compressed
+                except Exception:
+                    pass  # 压缩失败不影响主流程
+
+            # 应用状态映射
+            if rh_config.state_mapping and result.output:
+                for result_key, state_key in rh_config.state_mapping.items():
+                    if result_key in result.output:
+                        state[state_key] = result.output[result_key]
+
+        # 全局策略覆盖
+        if execution_strategy and execution_strategy.require_phase_review:
+            post_result["should_extract_memory"] = True
+            post_result["should_register_checkpoint"] = True
+
+        return post_result
+
+    def _get_validation_action(
+        self,
+        tool: Any,
+        validation_passed: bool,
+    ) -> str:
+        """
+        获取验证失败后的动作
+
+        Args:
+            tool: 工具实例
+            validation_passed: 验证是否通过
+
+        Returns:
+            动作: "retry" / "replan" / "abort" / "continue"
+        """
+        if validation_passed:
+            return "continue"
+
+        if not tool or not hasattr(tool, "definition"):
+            return "retry"  # 默认重试
+
+        post_policy = tool.definition.get_effective_post_policy()
+        if post_policy and post_policy.validation:
+            return post_policy.validation.on_fail
+
+        return "retry"

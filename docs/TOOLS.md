@@ -5,6 +5,7 @@
 ## 目录
 
 - [工具定义方式](#工具定义方式)
+- [统一后处理策略 (ToolPostPolicy)](#统一后处理策略-toolpostpolicy)
 - [错误恢复策略配置](#错误恢复策略配置)
 - [参数验证器](#参数验证器)
 - [替代工具配置](#替代工具配置)
@@ -103,6 +104,230 @@ class SearchTool(BaseTool):
         # 搜索逻辑...
         return {"success": True, "documents": [...]}
 ```
+
+---
+
+## 统一后处理策略 (ToolPostPolicy)
+
+`ToolPostPolicy` 是工具执行后的统一处理策略，将验证、一致性检查、结果处理等逻辑整合到一个配置类中。
+
+### 核心概念
+
+工具执行后的处理分为三个阶段：
+
+```
+工具执行完成
+      │
+      ▼
+┌─────────────────────────────────────┐
+│  第一阶段：ValidationConfig         │
+│  - 验证结果是否符合期望             │
+│  - 失败时决定动作（重试/重规划/中止）│
+└─────────────────────────────────────┘
+      │ 通过
+      ▼
+┌─────────────────────────────────────┐
+│  第二阶段：PostSuccessConfig        │
+│  - 高影响力工具标记                 │
+│  - 一致性检查                       │
+│  - 工作记忆提取                     │
+│  - 重规划条件评估                   │
+└─────────────────────────────────────┘
+      │
+      ▼
+┌─────────────────────────────────────┐
+│  第三阶段：ResultHandlingConfig     │
+│  - 结果压缩                         │
+│  - 缓存策略                         │
+│  - 注册为一致性检查点               │
+└─────────────────────────────────────┘
+      │
+      ▼
+    继续下一步
+```
+
+### 配置类定义
+
+```python
+from auto_agent.models import (
+    ToolPostPolicy,
+    ValidationConfig,
+    PostSuccessConfig,
+    ResultHandlingConfig,
+)
+
+# 完整配置示例
+post_policy = ToolPostPolicy(
+    # 第一阶段：结果验证
+    validation=ValidationConfig(
+        validate_function=my_validate_func,  # 可选的自定义验证函数
+        on_fail="retry",  # 失败动作: "retry" / "replan" / "abort" / "continue"
+        max_retries=3,    # 最大重试次数
+        use_llm_validation=True,  # 是否使用 LLM 语义验证
+    ),
+    
+    # 第二阶段：验证通过后的检查
+    post_success=PostSuccessConfig(
+        high_impact=True,  # 是否是高影响力工具
+        requires_consistency_check=True,  # 是否需要一致性检查
+        consistency_check_against=["interface", "schema"],  # 检查对象类型
+        replan_condition="如果生成的代码超过 100 行",  # 重规划条件
+        force_replan_check=False,  # 是否强制触发重规划检查
+        extract_working_memory=True,  # 是否提取工作记忆
+    ),
+    
+    # 第三阶段：结果处理
+    result_handling=ResultHandlingConfig(
+        compress_function=my_compress_func,  # 可选的结果压缩函数
+        cache_policy="session",  # 缓存策略: "none" / "session" / "persistent"
+        cache_ttl=3600,  # 缓存 TTL（秒）
+        register_as_checkpoint=True,  # 是否注册为一致性检查点
+        checkpoint_type="code",  # 检查点类型
+        state_mapping={"result": "output"},  # 状态映射
+    ),
+)
+```
+
+### 使用方式
+
+#### 方式 1: 使用 @tool 装饰器
+
+```python
+from auto_agent import tool, BaseTool
+from auto_agent.models import (
+    ToolPostPolicy, ValidationConfig, PostSuccessConfig, ResultHandlingConfig
+)
+
+@tool(
+    name="generate_code",
+    description="代码生成工具",
+    category="code",
+    post_policy=ToolPostPolicy(
+        validation=ValidationConfig(on_fail="retry", max_retries=3),
+        post_success=PostSuccessConfig(
+            high_impact=True,
+            requires_consistency_check=True,
+            extract_working_memory=True,
+        ),
+        result_handling=ResultHandlingConfig(
+            register_as_checkpoint=True,
+            checkpoint_type="code",
+        ),
+    ),
+)
+class CodeGeneratorTool(BaseTool):
+    async def execute(self, spec: str, **kwargs) -> dict:
+        # 代码生成逻辑...
+        return {"success": True, "code": "..."}
+```
+
+#### 方式 2: 使用 @func_tool 装饰器
+
+```python
+from auto_agent import func_tool
+from auto_agent.models import (
+    ToolPostPolicy, ValidationConfig, PostSuccessConfig, ResultHandlingConfig
+)
+
+@func_tool(
+    name="design_api",
+    description="API 设计工具",
+    post_policy=ToolPostPolicy(
+        post_success=PostSuccessConfig(
+            high_impact=True,
+            requires_consistency_check=True,
+            consistency_check_against=["interface"],
+        ),
+        result_handling=ResultHandlingConfig(
+            register_as_checkpoint=True,
+            checkpoint_type="interface",
+        ),
+    ),
+)
+async def design_api(requirements: str) -> dict:
+    # API 设计逻辑...
+    return {"success": True, "api_spec": {...}}
+```
+
+#### 方式 3: 在 ToolDefinition 中直接配置
+
+```python
+from auto_agent import ToolDefinition, ToolParameter
+from auto_agent.models import ToolPostPolicy, PostSuccessConfig
+
+tool_def = ToolDefinition(
+    name="my_tool",
+    description="我的工具",
+    parameters=[...],
+    post_policy=ToolPostPolicy(
+        post_success=PostSuccessConfig(high_impact=True),
+    ),
+)
+```
+
+### 辅助方法
+
+`ToolPostPolicy` 提供了便捷的辅助方法：
+
+```python
+policy = ToolPostPolicy(...)
+
+# 检查是否是高影响力工具
+policy.is_high_impact()  # -> bool
+
+# 检查是否需要一致性检查
+policy.should_check_consistency()  # -> bool
+
+# 检查是否需要注册检查点
+policy.should_register_checkpoint()  # -> bool
+
+# 检查是否需要提取工作记忆
+policy.should_extract_working_memory()  # -> bool
+```
+
+### 从旧字段迁移
+
+如果你的工具使用了旧的 `validate_function`、`compress_function` 或 `replan_policy` 字段，可以使用 `from_legacy()` 方法迁移：
+
+```python
+from auto_agent.models import ToolPostPolicy, ToolReplanPolicy
+
+# 旧方式
+old_replan_policy = ToolReplanPolicy(
+    high_impact=True,
+    requires_consistency_check=True,
+)
+
+# 迁移到新方式
+new_post_policy = ToolPostPolicy.from_legacy(
+    validate_function=my_validate,
+    compress_function=my_compress,
+    replan_policy=old_replan_policy,
+    state_mapping={"result": "output"},
+)
+```
+
+或者使用 `ToolDefinition.get_effective_post_policy()` 自动兼容：
+
+```python
+tool_def = ToolDefinition(
+    name="my_tool",
+    # 旧字段仍然可用
+    validate_function=my_validate,
+    replan_policy=old_replan_policy,
+)
+
+# 自动从旧字段构造 ToolPostPolicy
+effective_policy = tool_def.get_effective_post_policy()
+```
+
+### 最佳实践
+
+1. **高影响力工具**：代码生成、API 设计、数据库 schema 设计等工具应标记为 `high_impact=True`
+2. **一致性检查**：涉及接口定义、数据结构的工具应启用 `requires_consistency_check=True`
+3. **工作记忆提取**：复杂任务中的关键步骤应启用 `extract_working_memory=True`
+4. **检查点注册**：产出重要产物的工具应启用 `register_as_checkpoint=True`
+5. **缓存策略**：搜索、查询类工具可以使用 `cache_policy="session"` 减少重复调用
 
 ---
 

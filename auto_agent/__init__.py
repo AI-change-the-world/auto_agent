@@ -44,13 +44,17 @@ from auto_agent.models import (
     FailAction,
     Message,
     PlanStep,
+    PostSuccessConfig,
+    ResultHandlingConfig,
     StepResultData,
     SubTaskResult,
     TaskComplexity,
     TaskProfile,
     ToolDefinition,
     ToolParameter,
+    ToolPostPolicy,
     ToolReplanPolicy,
+    ValidationConfig,
     ValidationMode,
 )
 from auto_agent.retry.models import RetryConfig, RetryStrategy
@@ -129,6 +133,11 @@ __all__ = [
     "TaskComplexity",
     "TaskProfile",
     "ToolReplanPolicy",
+    # 统一后处理机制
+    "ToolPostPolicy",
+    "ValidationConfig",
+    "PostSuccessConfig",
+    "ResultHandlingConfig",
     # 重试
     "RetryConfig",
     "RetryStrategy",

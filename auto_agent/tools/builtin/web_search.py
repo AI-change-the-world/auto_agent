@@ -2,12 +2,31 @@
 网页搜索工具（示例）
 """
 
+from auto_agent.models import (
+    ResultHandlingConfig,
+    ToolPostPolicy,
+    ValidationConfig,
+)
 from auto_agent.tools.base import BaseTool
 from auto_agent.tools.models import ToolDefinition, ToolParameter
 from auto_agent.tools.registry import tool
 
 
-@tool(name="web_search", description="网页搜索", category="retrieval")
+@tool(
+    name="web_search",
+    description="网页搜索",
+    category="retrieval",
+    post_policy=ToolPostPolicy(
+        validation=ValidationConfig(
+            on_fail="retry",
+            max_retries=3,
+        ),
+        result_handling=ResultHandlingConfig(
+            cache_policy="session",
+            cache_ttl=1800,  # 30 分钟缓存
+        ),
+    ),
+)
 class WebSearchTool(BaseTool):
     """网页搜索工具（占位实现）"""
 

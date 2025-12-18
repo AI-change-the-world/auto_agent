@@ -389,26 +389,53 @@ class ToolDefinition:
 
 ### TODO 清单
 
-- [ ] **P1.1 定义 ToolPostPolicy 及子配置类**
-  - ValidationConfig
-  - PostSuccessConfig  
-  - ResultHandlingConfig
+- [x] **P1.1 定义 ToolPostPolicy 及子配置类** ✅
+  - `ValidationConfig`: 结果验证配置
+  - `PostSuccessConfig`: 验证通过后检查配置
+  - `ResultHandlingConfig`: 结果处理配置
+  - `ToolPostPolicy`: 统一后处理策略
+  - 📍 实现位置: `auto_agent/models.py`
 
-- [ ] **P1.2 在 ToolDefinition 中添加 post_policy 字段**
+- [x] **P1.2 在 ToolDefinition 中添加 post_policy 字段** ✅
+  - 📍 实现位置: `auto_agent/models.py` - `ToolDefinition.post_policy`
 
-- [ ] **P1.3 实现 get_effective_post_policy() 兼容方法**
+- [x] **P1.3 实现 get_effective_post_policy() 兼容方法** ✅
+  - 优先使用 `post_policy`，否则从旧字段构造
+  - 实现 `ToolPostPolicy.from_legacy()` 静态方法
+  - 📍 实现位置: `auto_agent/models.py` - `ToolDefinition.get_effective_post_policy()`
 
-- [ ] **P1.4 修改 ExecutionEngine 使用统一的后处理流程**
-  - 替换现有的分散逻辑
-  - 实现三阶段处理流程
+- [x] **P1.4 修改 ExecutionEngine 使用统一的后处理流程** ✅
+  - 实现 `_apply_post_policy()` 方法
+  - 实现 `_get_validation_action()` 方法
+  - 替换执行循环中的分散逻辑
+  - 📍 实现位置: `auto_agent/core/executor.py`
 
-- [ ] **P1.5 更新 @tool 装饰器支持 post_policy 参数**
+- [x] **P1.5 更新 @tool 和 @func_tool 装饰器支持 post_policy 参数** ✅
+  - `@tool` 装饰器支持 `replan_policy` 和 `post_policy` 参数
+  - `@func_tool` 装饰器支持 `replan_policy` 和 `post_policy` 参数
+  - 更新文档示例
+  - 📍 实现位置: `auto_agent/tools/registry.py`
 
-- [ ] **P1.6 迁移内置工具到新的 post_policy 配置**
+- [x] **P1.6 迁移内置工具到新的 post_policy 配置** ✅
+  - `code_executor`: 高影响力工具，配置一致性检查和工作记忆提取
+  - `web_search`: 配置结果缓存策略
+  - `calculator`: 简单工具，无需特殊后处理
+  - 📍 实现位置: `auto_agent/tools/builtin/`
 
-- [ ] **P2.1 标记旧字段为 deprecated**
+- [x] **P2.1 标记旧字段为 deprecated** ✅
+  - `validate_function`: 标记为废弃，推荐使用 `post_policy.validation`
+  - `compress_function`: 标记为废弃，推荐使用 `post_policy.result_handling`
+  - `replan_policy`: 标记为废弃，推荐使用 `post_policy.post_success`
+  - `param_aliases`: 标记为废弃，推荐使用 LLM 语义理解
+  - `state_mapping`: 标记为废弃，推荐使用 `post_policy.result_handling.state_mapping`
+  - 更新 `ToolDefinition` 类文档，添加迁移指南
+  - 📍 实现位置: `auto_agent/models.py`
 
-- [ ] **P2.2 更新文档和示例**
+- [x] **P2.2 更新文档和示例** ✅
+  - 在 `docs/TOOLS.md` 中添加 "统一后处理策略 (ToolPostPolicy)" 章节
+  - 包含核心概念、配置类定义、使用方式、辅助方法、迁移指南、最佳实践
+  - 更新目录结构
+  - 📍 实现位置: `docs/TOOLS.md`
 
 - [ ] **P3.1 移除旧字段（breaking change）**
 

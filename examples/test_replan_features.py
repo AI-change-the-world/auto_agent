@@ -459,10 +459,113 @@ def test_consistency_in_context():
     return True
 
 
+def test_tool_post_policy():
+    """测试统一后处理策略"""
+    print("\n" + "=" * 60)
+    print("测试 9: 统一后处理策略 (ToolPostPolicy)")
+    print("=" * 60)
+
+    from auto_agent.models import (
+        PostSuccessConfig,
+        ResultHandlingConfig,
+        ToolDefinition,
+        ToolParameter,
+        ToolPostPolicy,
+        ToolReplanPolicy,
+        ValidationConfig,
+    )
+
+    # 测试 1: 直接使用 ToolPostPolicy
+    post_policy = ToolPostPolicy(
+        validation=ValidationConfig(
+            on_fail="retry",
+            max_retries=3,
+            use_llm_validation=True,
+        ),
+        post_success=PostSuccessConfig(
+            high_impact=True,
+            requires_consistency_check=True,
+            extract_working_memory=True,
+            replan_condition="如果生成的代码超过 100 行",
+        ),
+        result_handling=ResultHandlingConfig(
+            cache_policy="session",
+            register_as_checkpoint=True,
+            checkpoint_type="code",
+            state_mapping={"generated_code": "code_output"},
+        ),
+    )
+
+    print("\n✅ ToolPostPolicy 创建成功:")
+    print(f"   validation.on_fail: {post_policy.validation.on_fail}")
+    print(f"   post_success.high_impact: {post_policy.post_success.high_impact}")
+    print(f"   result_handling.checkpoint_type: {post_policy.result_handling.checkpoint_type}")
+
+    # 测试辅助方法
+    print("\n✅ 辅助方法测试:")
+    print(f"   is_high_impact(): {post_policy.is_high_impact()}")
+    print(f"   should_check_consistency(): {post_policy.should_check_consistency()}")
+    print(f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}")
+    print(f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}")
+
+    # 测试 2: 从旧字段构造（兼容性）
+    old_replan_policy = ToolReplanPolicy(
+        high_impact=True,
+        requires_consistency_check=True,
+        replan_condition="如果涉及多个文件",
+    )
+
+    legacy_post_policy = ToolPostPolicy.from_legacy(
+        validate_function=lambda r, e, s, m: (True, "OK"),
+        compress_function=lambda r, s: {"summary": "compressed"},
+        replan_policy=old_replan_policy,
+        state_mapping={"output": "result"},
+    )
+
+    print("\n✅ 从旧字段构造 ToolPostPolicy:")
+    print(f"   has validation: {legacy_post_policy.validation is not None}")
+    print(f"   has post_success: {legacy_post_policy.post_success is not None}")
+    print(f"   has result_handling: {legacy_post_policy.result_handling is not None}")
+    print(f"   is_high_impact(): {legacy_post_policy.is_high_impact()}")
+
+    # 测试 3: ToolDefinition.get_effective_post_policy()
+    # 使用新字段
+    tool_with_new = ToolDefinition(
+        name="new_tool",
+        description="使用新 post_policy 的工具",
+        parameters=[],
+        post_policy=post_policy,
+    )
+
+    # 使用旧字段
+    tool_with_old = ToolDefinition(
+        name="old_tool",
+        description="使用旧字段的工具",
+        parameters=[],
+        replan_policy=old_replan_policy,
+        compress_function=lambda r, s: r,
+    )
+
+    print("\n✅ ToolDefinition.get_effective_post_policy():")
+    
+    new_effective = tool_with_new.get_effective_post_policy()
+    print(f"   新工具 - is_high_impact: {new_effective.is_high_impact()}")
+    
+    old_effective = tool_with_old.get_effective_post_policy()
+    print(f"   旧工具 - is_high_impact: {old_effective.is_high_impact()}")
+
+    # 测试序列化
+    policy_dict = post_policy.to_dict()
+    print("\n✅ 序列化测试:")
+    print(f"   to_dict() keys: {list(policy_dict.keys())}")
+
+    return True
+
+
 def test_incremental_replan_structure():
     """测试增量重规划的数据结构"""
     print("\n" + "=" * 60)
-    print("测试 9: 增量重规划数据结构")
+    print("测试 10: 增量重规划数据结构")
     print("=" * 60)
 
     from auto_agent.models import ExecutionPlan, ExecutionStrategy, PlanStep, SubTaskResult
@@ -569,6 +672,9 @@ async def main():
 
     # 阶段四测试：增量重规划
     results.append(("增量重规划数据结构", test_incremental_replan_structure()))
+
+    # 统一后处理机制测试
+    results.append(("统一后处理策略", test_tool_post_policy()))
 
     # LLM 测试（可选）
     results.append(("任务分类（LLM）", await test_task_classification()))

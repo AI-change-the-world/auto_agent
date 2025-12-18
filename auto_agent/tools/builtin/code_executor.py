@@ -2,12 +2,37 @@
 代码执行工具（示例）
 """
 
+from auto_agent.models import (
+    PostSuccessConfig,
+    ResultHandlingConfig,
+    ToolPostPolicy,
+    ValidationConfig,
+)
 from auto_agent.tools.base import BaseTool
 from auto_agent.tools.models import ToolDefinition, ToolParameter
 from auto_agent.tools.registry import tool
 
 
-@tool(name="code_executor", description="执行 Python 代码", category="execution")
+@tool(
+    name="code_executor",
+    description="执行 Python 代码",
+    category="execution",
+    post_policy=ToolPostPolicy(
+        validation=ValidationConfig(
+            on_fail="retry",
+            max_retries=2,
+        ),
+        post_success=PostSuccessConfig(
+            high_impact=True,
+            requires_consistency_check=True,
+            extract_working_memory=True,
+        ),
+        result_handling=ResultHandlingConfig(
+            register_as_checkpoint=True,
+            checkpoint_type="code",
+        ),
+    ),
+)
 class CodeExecutorTool(BaseTool):
     """代码执行工具（占位实现）"""
 

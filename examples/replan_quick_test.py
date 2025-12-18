@@ -307,6 +307,153 @@ async def test_execution_strategy():
     return True
 
 
+def test_unified_post_policy():
+    """测试统一后处理策略"""
+    print("\n" + "=" * 60)
+    print("测试 5: 统一后处理策略 (ToolPostPolicy)")
+    print("=" * 60)
+
+    from auto_agent.models import (
+        PostSuccessConfig,
+        ResultHandlingConfig,
+        ToolDefinition,
+        ToolPostPolicy,
+        ToolReplanPolicy,
+        ValidationConfig,
+    )
+
+    # 创建完整的 ToolPostPolicy
+    post_policy = ToolPostPolicy(
+        validation=ValidationConfig(
+            on_fail="retry",
+            max_retries=3,
+        ),
+        post_success=PostSuccessConfig(
+            high_impact=True,
+            requires_consistency_check=True,
+            extract_working_memory=True,
+        ),
+        result_handling=ResultHandlingConfig(
+            register_as_checkpoint=True,
+            checkpoint_type="interface",
+        ),
+    )
+
+    print("\n✅ ToolPostPolicy 创建成功:")
+    print(f"   is_high_impact(): {post_policy.is_high_impact()}")
+    print(f"   should_check_consistency(): {post_policy.should_check_consistency()}")
+    print(f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}")
+    print(f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}")
+
+    # 测试从旧字段构造
+    old_policy = ToolReplanPolicy(high_impact=True, requires_consistency_check=True)
+    legacy = ToolPostPolicy.from_legacy(replan_policy=old_policy)
+
+    print("\n✅ 从旧字段构造:")
+    print(f"   is_high_impact(): {legacy.is_high_impact()}")
+
+    # 测试 ToolDefinition.get_effective_post_policy()
+    tool = ToolDefinition(
+        name="test_tool",
+        description="测试工具",
+        parameters=[],
+        post_policy=post_policy,
+    )
+
+    effective = tool.get_effective_post_policy()
+    print("\n✅ get_effective_post_policy():")
+    print(f"   is_high_impact(): {effective.is_high_impact()}")
+
+    return True
+
+
+def test_func_tool_decorator():
+    """测试 @func_tool 装饰器支持 post_policy"""
+    print("\n" + "=" * 60)
+    print("测试 6: @func_tool 装饰器支持 post_policy")
+    print("=" * 60)
+
+    from auto_agent.models import (
+        PostSuccessConfig,
+        ResultHandlingConfig,
+        ToolPostPolicy,
+        ToolReplanPolicy,
+        ValidationConfig,
+    )
+    from auto_agent.tools.registry import func_tool, get_global_registry
+
+    # 测试 1: 使用 post_policy 参数
+    @func_tool(
+        name="test_code_generator",
+        description="测试代码生成工具",
+        category="test",
+        post_policy=ToolPostPolicy(
+            validation=ValidationConfig(on_fail="retry", max_retries=2),
+            post_success=PostSuccessConfig(
+                high_impact=True,
+                requires_consistency_check=True,
+                extract_working_memory=True,
+            ),
+            result_handling=ResultHandlingConfig(
+                register_as_checkpoint=True,
+                checkpoint_type="code",
+            ),
+        ),
+        auto_register=False,  # 不自动注册，避免污染全局注册表
+    )
+    async def test_code_generator(spec: str) -> dict:
+        return {"success": True, "code": f"# Generated from: {spec}"}
+
+    # 获取工具实例
+    tool_instance = test_code_generator._tool_class()
+    defn = tool_instance.definition
+
+    print("\n✅ @func_tool 使用 post_policy:")
+    print(f"   工具名称: {defn.name}")
+    print(f"   has post_policy: {defn.post_policy is not None}")
+
+    if defn.post_policy:
+        effective = defn.get_effective_post_policy()
+        print(f"   is_high_impact(): {effective.is_high_impact()}")
+        print(f"   should_check_consistency(): {effective.should_check_consistency()}")
+        print(f"   should_register_checkpoint(): {effective.should_register_checkpoint()}")
+        print(f"   checkpoint_type: {effective.result_handling.checkpoint_type if effective.result_handling else None}")
+
+    # 测试 2: 使用 replan_policy 参数（旧方式）
+    @func_tool(
+        name="test_api_designer",
+        description="测试 API 设计工具",
+        category="test",
+        replan_policy=ToolReplanPolicy(
+            high_impact=True,
+            requires_consistency_check=True,
+            replan_condition="如果设计了超过 5 个端点",
+        ),
+        auto_register=False,
+    )
+    async def test_api_designer(requirements: str) -> dict:
+        return {"success": True, "api_spec": {"endpoints": []}}
+
+    tool_instance2 = test_api_designer._tool_class()
+    defn2 = tool_instance2.definition
+
+    print("\n✅ @func_tool 使用 replan_policy (旧方式):")
+    print(f"   工具名称: {defn2.name}")
+    print(f"   has replan_policy: {defn2.replan_policy is not None}")
+
+    if defn2.replan_policy:
+        print(f"   high_impact: {defn2.replan_policy.high_impact}")
+        print(f"   replan_condition: {defn2.replan_policy.replan_condition}")
+
+    # 测试 get_effective_post_policy() 从旧字段构造
+    effective2 = defn2.get_effective_post_policy()
+    print(f"\n✅ get_effective_post_policy() 从 replan_policy 构造:")
+    print(f"   is_high_impact(): {effective2.is_high_impact()}")
+    print(f"   should_check_consistency(): {effective2.should_check_consistency()}")
+
+    return True
+
+
 async def main():
     """运行所有测试"""
     print("\n" + "=" * 60)
@@ -319,6 +466,8 @@ async def main():
     results.append(("一致性检查器在上下文中", await test_consistency_checker_in_context()))
     results.append(("工具级 Replan 策略", await test_tool_replan_policy()))
     results.append(("执行策略选择", await test_execution_strategy()))
+    results.append(("统一后处理策略", test_unified_post_policy()))
+    results.append(("@func_tool 装饰器", test_func_tool_decorator()))
 
     # 汇总结果
     print("\n" + "=" * 60)

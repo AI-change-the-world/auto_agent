@@ -454,7 +454,7 @@ class GenerateTestTool(BaseTool):
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=3000,
+                max_tokens=8192,
             )
 
             json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)

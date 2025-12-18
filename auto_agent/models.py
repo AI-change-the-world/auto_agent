@@ -138,6 +138,225 @@ class ToolReplanPolicy:
         }
 
 
+# ==================== 统一后处理机制 ====================
+
+
+@dataclass
+class ValidationConfig:
+    """
+    结果验证配置（整合原 validate_function）
+
+    第一阶段：验证工具执行结果是否符合期望
+    """
+
+    # 验证函数: (result, expectations, state, mode) -> (passed, reason)
+    validate_function: Optional[Callable] = None
+
+    # 验证失败后的动作
+    # - "retry": 重试当前步骤
+    # - "replan": 触发重规划
+    # - "abort": 中止执行
+    # - "continue": 忽略错误继续
+    on_fail: str = "retry"
+
+    # 最大重试次数（仅 on_fail="retry" 时生效）
+    max_retries: int = 3
+
+    # 是否使用 LLM 进行语义验证（当 validate_function 为空时）
+    use_llm_validation: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "on_fail": self.on_fail,
+            "max_retries": self.max_retries,
+            "use_llm_validation": self.use_llm_validation,
+            "has_validate_function": self.validate_function is not None,
+        }
+
+
+@dataclass
+class PostSuccessConfig:
+    """
+    验证通过后的检查配置（整合原 replan_policy 部分功能）
+
+    第二阶段：验证通过后的额外检查
+    """
+
+    # 是否是高影响力工具（输出会影响后续多个步骤）
+    high_impact: bool = False
+
+    # 是否需要与历史步骤做一致性检查
+    requires_consistency_check: bool = False
+
+    # 需要与哪些类型的历史检查点做一致性检查
+    # 例: ["interface", "schema", "config"]
+    consistency_check_against: List[str] = field(default_factory=list)
+
+    # 自定义的 replan 触发条件（验证通过后才评估）
+    # 自然语言描述，让 LLM 判断
+    # 例: "如果生成的代码超过 100 行，或涉及多个文件"
+    replan_condition: Optional[str] = None
+
+    # 是否强制触发 replan 检查
+    force_replan_check: bool = False
+
+    # 是否提取工作记忆（设计决策、约束、待办等）
+    extract_working_memory: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "high_impact": self.high_impact,
+            "requires_consistency_check": self.requires_consistency_check,
+            "consistency_check_against": self.consistency_check_against,
+            "replan_condition": self.replan_condition,
+            "force_replan_check": self.force_replan_check,
+            "extract_working_memory": self.extract_working_memory,
+        }
+
+
+@dataclass
+class ResultHandlingConfig:
+    """
+    结果处理配置（整合原 compress_function 等）
+
+    第三阶段：处理和存储执行结果
+    """
+
+    # 结果压缩函数: (result, state) -> compressed_result
+    compress_function: Optional[Callable] = None
+
+    # 缓存策略
+    # - "none": 不缓存
+    # - "session": 会话级缓存
+    # - "persistent": 持久化缓存
+    cache_policy: str = "none"
+
+    # 缓存 TTL（秒），仅当 cache_policy != "none" 时生效
+    cache_ttl: int = 3600
+
+    # 是否注册为一致性检查点（供后续步骤检查）
+    register_as_checkpoint: bool = False
+
+    # 检查点类型（仅当 register_as_checkpoint=True 时生效）
+    # 例: "interface" / "schema" / "config" / "code" / "document"
+    checkpoint_type: Optional[str] = None
+
+    # 结果字段到状态字段的映射
+    # 例: {"search_query": "search_queries"}
+    state_mapping: Dict[str, str] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "cache_policy": self.cache_policy,
+            "cache_ttl": self.cache_ttl,
+            "register_as_checkpoint": self.register_as_checkpoint,
+            "checkpoint_type": self.checkpoint_type,
+            "state_mapping": self.state_mapping,
+            "has_compress_function": self.compress_function is not None,
+        }
+
+
+@dataclass
+class ToolPostPolicy:
+    """
+    工具执行后的统一策略
+
+    将所有后处理逻辑统一到一个配置类中：
+    - 第一阶段：结果验证 (ValidationConfig)
+    - 第二阶段：通过后检查 (PostSuccessConfig)
+    - 第三阶段：结果处理 (ResultHandlingConfig)
+
+    执行流程：
+    1. 工具执行完成
+    2. ValidationConfig: 验证结果，失败则根据 on_fail 决定动作
+    3. PostSuccessConfig: 验证通过后，检查一致性、评估 replan 条件
+    4. ResultHandlingConfig: 压缩结果、缓存、注册检查点
+    5. 继续下一步
+    """
+
+    # 第一阶段：结果验证
+    validation: Optional[ValidationConfig] = None
+
+    # 第二阶段：通过后的额外检查
+    post_success: Optional[PostSuccessConfig] = None
+
+    # 第三阶段：结果处理
+    result_handling: Optional[ResultHandlingConfig] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "validation": self.validation.to_dict() if self.validation else None,
+            "post_success": self.post_success.to_dict() if self.post_success else None,
+            "result_handling": self.result_handling.to_dict() if self.result_handling else None,
+        }
+
+    @classmethod
+    def from_legacy(
+        cls,
+        validate_function: Optional[Callable] = None,
+        compress_function: Optional[Callable] = None,
+        replan_policy: Optional["ToolReplanPolicy"] = None,
+        state_mapping: Optional[Dict[str, str]] = None,
+    ) -> "ToolPostPolicy":
+        """
+        从旧字段构造 ToolPostPolicy（兼容性方法）
+
+        Args:
+            validate_function: 旧的验证函数
+            compress_function: 旧的压缩函数
+            replan_policy: 旧的 replan 策略
+            state_mapping: 旧的状态映射
+
+        Returns:
+            构造的 ToolPostPolicy
+        """
+        validation = None
+        if validate_function:
+            validation = ValidationConfig(
+                validate_function=validate_function,
+            )
+
+        post_success = None
+        if replan_policy:
+            post_success = PostSuccessConfig(
+                high_impact=replan_policy.high_impact,
+                requires_consistency_check=replan_policy.requires_consistency_check,
+                consistency_check_against=replan_policy.consistency_check_against,
+                replan_condition=replan_policy.replan_condition,
+                force_replan_check=replan_policy.force_replan_check,
+                extract_working_memory=replan_policy.high_impact,  # 高影响力工具默认提取
+            )
+
+        result_handling = None
+        if compress_function or state_mapping:
+            result_handling = ResultHandlingConfig(
+                compress_function=compress_function,
+                state_mapping=state_mapping or {},
+            )
+
+        return cls(
+            validation=validation,
+            post_success=post_success,
+            result_handling=result_handling,
+        )
+
+    def is_high_impact(self) -> bool:
+        """是否是高影响力工具"""
+        return self.post_success is not None and self.post_success.high_impact
+
+    def should_check_consistency(self) -> bool:
+        """是否需要一致性检查"""
+        return self.post_success is not None and self.post_success.requires_consistency_check
+
+    def should_register_checkpoint(self) -> bool:
+        """是否需要注册检查点"""
+        return self.result_handling is not None and self.result_handling.register_as_checkpoint
+
+    def should_extract_working_memory(self) -> bool:
+        """是否需要提取工作记忆"""
+        return self.post_success is not None and self.post_success.extract_working_memory
+
+
 # ==================== 消息模型 ====================
 
 
@@ -399,8 +618,31 @@ class ToolDefinition:
     工具定义（增强版）
 
     支持：
-    - validate_function: 自定义验证函数
-    - compress_function: 自定义结果压缩函数
+    - post_policy: 统一后处理策略（推荐使用）
+    - validate_function: 自定义验证函数（已废弃，请使用 post_policy.validation）
+    - compress_function: 自定义结果压缩函数（已废弃，请使用 post_policy.result_handling）
+    - replan_policy: 工具级 replan 策略（已废弃，请使用 post_policy.post_success）
+
+    迁移指南：
+    ```python
+    # 旧方式（已废弃）
+    ToolDefinition(
+        name="my_tool",
+        validate_function=my_validate,
+        compress_function=my_compress,
+        replan_policy=ToolReplanPolicy(high_impact=True),
+    )
+
+    # 新方式（推荐）
+    ToolDefinition(
+        name="my_tool",
+        post_policy=ToolPostPolicy(
+            validation=ValidationConfig(validate_function=my_validate),
+            post_success=PostSuccessConfig(high_impact=True),
+            result_handling=ResultHandlingConfig(compress_function=my_compress),
+        ),
+    )
+    ```
     """
 
     name: str
@@ -412,20 +654,20 @@ class ToolDefinition:
     examples: List[Dict[str, Any]] = field(default_factory=list)
     output_schema: Optional[Dict[str, Any]] = None
 
+    # ⚠️ DEPRECATED: 请使用 post_policy.validation.validate_function
     # 验证函数：(result, expectations, state, mode: ValidationMode, llm_client, db) -> (passed, reason)
     validate_function: Optional[Callable] = None
 
+    # ⚠️ DEPRECATED: 请使用 post_policy.result_handling.compress_function
     # 压缩函数：(result, state) -> compressed_result
     compress_function: Optional[Callable] = None
 
+    # ⚠️ DEPRECATED: 请使用 LLM 语义理解自动完成参数映射
     # 参数别名映射：{param_name: state_field_name}
     # 例如 {"input_text": "query"} 表示从 state["query"] 读取值赋给 input_text 参数
-    #
-    # ⚠️ DEPRECATED: 此参数将在未来版本中移除
-    # 推荐使用 LLM 语义理解自动完成参数映射，而不是手动定义别名
-    # 新的参数构造机制会基于 StepResultData 的 description 字段进行语义匹配
     param_aliases: Dict[str, str] = field(default_factory=dict)
 
+    # ⚠️ DEPRECATED: 请使用 post_policy.result_handling.state_mapping
     # 状态写入映射：{result_field: state_field}
     # 例如 {"search_query": "search_queries"} 表示将 result["search_query"] 写入 state["search_queries"]
     state_mapping: Dict[str, str] = field(default_factory=dict)
@@ -451,8 +693,32 @@ class ToolDefinition:
     # 参数验证器列表：在执行前验证参数有效性
     parameter_validators: List["ParameterValidator"] = field(default_factory=list)
 
-    # === 工具级 Replan 策略 ===
+    # ⚠️ DEPRECATED: 请使用 post_policy.post_success
+    # 工具级 Replan 策略（旧字段，推荐使用 post_policy）
     replan_policy: Optional["ToolReplanPolicy"] = None
+
+    # === 统一后处理策略（新字段，推荐使用）===
+    post_policy: Optional["ToolPostPolicy"] = None
+
+    def get_effective_post_policy(self) -> "ToolPostPolicy":
+        """
+        获取生效的后处理策略（兼容旧字段）
+
+        优先级：post_policy > 从旧字段构造
+
+        Returns:
+            生效的 ToolPostPolicy
+        """
+        if self.post_policy:
+            return self.post_policy
+
+        # 从旧字段构造
+        return ToolPostPolicy.from_legacy(
+            validate_function=self.validate_function,
+            compress_function=self.compress_function,
+            replan_policy=self.replan_policy,
+            state_mapping=self.state_mapping,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

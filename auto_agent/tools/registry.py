@@ -10,7 +10,7 @@
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from auto_agent.models import ToolDefinition, ToolParameter
+from auto_agent.models import ToolDefinition, ToolParameter, ToolPostPolicy, ToolReplanPolicy
 from auto_agent.tools.base import BaseTool
 
 
@@ -202,6 +202,8 @@ def tool(
     output_schema: Optional[Dict[str, Any]] = None,
     validate_function: Optional[Callable] = None,
     compress_function: Optional[Callable] = None,
+    replan_policy: Optional["ToolReplanPolicy"] = None,
+    post_policy: Optional["ToolPostPolicy"] = None,
     auto_register: bool = True,
 ):
     """
@@ -214,7 +216,7 @@ def tool(
     class CalculatorTool(BaseTool):
         ...
 
-    # 方式2: 使用自定义验证函数
+    # 方式2: 使用自定义验证函数（旧方式，仍支持）
     def validate_search(result, expectations, state, mode: ValidationMode, llm_client, db):
         if mode == ValidationMode.NONE:
             return result.get("success", False), "无需校验"
@@ -224,22 +226,50 @@ def tool(
             return False, "结果数量不足"
         return result.get("success", False), "宽松校验通过"
 
-    # 方式3: 使用自定义压缩函数
-    def compress_search(result, state):
-        # 只保留文档ID，不保留完整内容
-        return {
-            "success": result.get("success"),
-            "document_ids": result.get("document_ids", [])[:20],
-            "count": len(result.get("document_ids", [])),
-        }
-
     @tool(
         name="es_fulltext_search",
         description="全文检索",
         validate_function=validate_search,
-        compress_function=compress_search,
     )
     class ESFulltextSearchTool(BaseTool):
+        ...
+
+    # 方式3: 使用统一后处理策略（推荐）
+    from auto_agent.models import (
+        ToolPostPolicy, ValidationConfig, PostSuccessConfig, ResultHandlingConfig
+    )
+
+    @tool(
+        name="generate_code",
+        description="代码生成工具",
+        post_policy=ToolPostPolicy(
+            validation=ValidationConfig(on_fail="retry", max_retries=3),
+            post_success=PostSuccessConfig(
+                high_impact=True,
+                requires_consistency_check=True,
+                extract_working_memory=True,
+            ),
+            result_handling=ResultHandlingConfig(
+                register_as_checkpoint=True,
+                checkpoint_type="code",
+            ),
+        ),
+    )
+    class CodeGeneratorTool(BaseTool):
+        ...
+
+    # 方式4: 使用 replan_policy（旧方式，仍支持）
+    from auto_agent.models import ToolReplanPolicy
+
+    @tool(
+        name="design_api",
+        description="API 设计工具",
+        replan_policy=ToolReplanPolicy(
+            high_impact=True,
+            requires_consistency_check=True,
+        ),
+    )
+    class DesignAPITool(BaseTool):
         ...
     ```
 
@@ -250,8 +280,10 @@ def tool(
         tags: 标签列表
         parameters: 参数定义列表
         output_schema: 输出结构定义
-        validate_function: 自定义验证函数
-        compress_function: 自定义结果压缩函数
+        validate_function: 自定义验证函数（旧方式，推荐使用 post_policy）
+        compress_function: 自定义结果压缩函数（旧方式，推荐使用 post_policy）
+        replan_policy: 工具级 replan 策略（旧方式，推荐使用 post_policy）
+        post_policy: 统一后处理策略（推荐使用）
         auto_register: 是否自动注册到全局注册表
     """
 
@@ -280,6 +312,8 @@ def tool(
         cls._tool_output_schema = output_schema
         cls._tool_validate_function = validate_function
         cls._tool_compress_function = compress_function
+        cls._tool_replan_policy = replan_policy
+        cls._tool_post_policy = post_policy
 
         # 重写 definition 属性
         original_definition = getattr(cls, "definition", None)
@@ -300,6 +334,8 @@ def tool(
                     output_schema=output_schema or base_def.output_schema,
                     validate_function=validate_function,
                     compress_function=compress_function,
+                    replan_policy=replan_policy,
+                    post_policy=post_policy,
                 )
             return ToolDefinition(
                 name=name,
@@ -310,6 +346,8 @@ def tool(
                 output_schema=output_schema,
                 validate_function=validate_function,
                 compress_function=compress_function,
+                replan_policy=replan_policy,
+                post_policy=post_policy,
             )
 
         cls.definition = enhanced_definition
@@ -334,6 +372,8 @@ def func_tool(
     output_schema: Optional[Dict[str, Any]] = None,
     compress_function: Optional[Callable] = None,
     validate_function: Optional[Callable] = None,
+    replan_policy: Optional["ToolReplanPolicy"] = None,
+    post_policy: Optional["ToolPostPolicy"] = None,
     context_param: Optional[str] = None,
     param_aliases: Optional[Dict[str, str]] = None,
     state_mapping: Optional[Dict[str, str]] = None,
@@ -391,6 +431,44 @@ def func_tool(
     )
     async def analyze_input(ctx, input_text: str) -> dict:
         return {"success": True}
+
+    # 方式5: 使用统一后处理策略（推荐）
+    from auto_agent.models import (
+        ToolPostPolicy, ValidationConfig, PostSuccessConfig, ResultHandlingConfig
+    )
+
+    @func_tool(
+        name="generate_code",
+        description="代码生成工具",
+        post_policy=ToolPostPolicy(
+            validation=ValidationConfig(on_fail="retry", max_retries=3),
+            post_success=PostSuccessConfig(
+                high_impact=True,
+                requires_consistency_check=True,
+                extract_working_memory=True,
+            ),
+            result_handling=ResultHandlingConfig(
+                register_as_checkpoint=True,
+                checkpoint_type="code",
+            ),
+        ),
+    )
+    async def generate_code(spec: str) -> dict:
+        return {"success": True, "code": "..."}
+
+    # 方式6: 使用 replan_policy（旧方式，仍支持）
+    from auto_agent.models import ToolReplanPolicy
+
+    @func_tool(
+        name="design_api",
+        description="API 设计工具",
+        replan_policy=ToolReplanPolicy(
+            high_impact=True,
+            requires_consistency_check=True,
+        ),
+    )
+    async def design_api(requirements: str) -> dict:
+        return {"success": True, "api_spec": "..."}
     ```
 
     Args:
@@ -400,8 +478,10 @@ def func_tool(
         tags: 标签列表
         parameters: 参数定义列表（可选，不提供则自动推断）
         output_schema: 输出结构定义
-        compress_function: 自定义结果压缩函数
-        validate_function: 自定义验证函数
+        compress_function: 自定义结果压缩函数（旧方式，推荐使用 post_policy）
+        validate_function: 自定义验证函数（旧方式，推荐使用 post_policy）
+        replan_policy: 工具级 replan 策略（旧方式，推荐使用 post_policy）
+        post_policy: 统一后处理策略（推荐使用）
         context_param: 上下文参数名（如 "ctx"），该参数不会被推断为工具参数
         param_aliases: 参数别名映射 {param_name: state_field_name}
         state_mapping: 状态写入映射 {result_field: state_field}
@@ -502,6 +582,8 @@ def func_tool(
                     output_schema=output_schema,
                     compress_function=compress_function,
                     validate_function=validate_function,
+                    replan_policy=replan_policy,
+                    post_policy=post_policy,
                     param_aliases=_param_aliases,
                     state_mapping=_state_mapping,
                 )
