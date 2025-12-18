@@ -18,6 +18,7 @@ from auto_agent import (
     ExecutionPlan,
     PlanStep,
     SubTaskResult,
+    ExecutionReportGenerator,
 )
 
 from .tools import (
@@ -71,6 +72,7 @@ class FullstackGeneratorRunner:
         self.collected_results: List[SubTaskResult] = []
         self.collected_state: Dict[str, Any] = {}
         self.collected_trace: Optional[Dict[str, Any]] = None
+        self.collected_trace_full: Optional[Dict[str, Any]] = None  # 完整版追踪数据
         
         # 生成的代码
         self.generated_code: Dict[str, str] = {}
@@ -304,11 +306,33 @@ class FullstackGeneratorRunner:
                 elif event_type == "done":
                     execution_success = data.get("success", False)
                     self.collected_trace = data.get("trace")
+                    self.collected_trace_full = data.get("trace_full")  # 完整版追踪数据
                     
                     if verbose:
                         print("\n" + "=" * 70)
                         if execution_success:
                             print(f"✅ 项目生成完成!")
+                            # 显示追踪统计
+                            if self.collected_trace:
+                                trace_summary = self.collected_trace.get("summary", {})
+                                llm_calls = trace_summary.get("llm_calls", {})
+                                print(f"   🔍 追踪ID: {self.collected_trace.get('trace_id', 'N/A')}")
+                                print(f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}")
+                                # 显示按目的分类的统计
+                                by_purpose = llm_calls.get("by_purpose", {})
+                                if by_purpose:
+                                    print("   📊 按目的分类:")
+                                    purpose_names = {
+                                        "planning": "任务规划",
+                                        "param_build": "参数构造",
+                                        "param_fix": "参数修正",
+                                        "prompt_gen": "Prompt生成",
+                                        "replan": "重规划",
+                                        "other": "其他",
+                                    }
+                                    for purpose, stats in by_purpose.items():
+                                        name = purpose_names.get(purpose, purpose)
+                                        print(f"      - {name}: {stats.get('count', 0)} 次, {stats.get('tokens', 0):,} tokens")
                         else:
                             print(f"❌ 项目生成失败: {data.get('message', '')}")
                         print("=" * 70)

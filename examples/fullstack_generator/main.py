@@ -26,11 +26,87 @@ import argparse
 import asyncio
 import os
 import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict
 
 # 添加项目根目录到 path，使用本地版本而非安装的包
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from examples.fullstack_generator.runner import FullstackGeneratorRunner
+
+
+def save_execution_report(
+    result: Dict[str, Any],
+    requirements: str,
+    project_name: str,
+) -> str:
+    """使用框架内置的报告生成器保存执行报告"""
+    from auto_agent.core.report.generator import ExecutionReportGenerator
+    
+    output_dir = Path(result.get("output_dir", "."))
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = output_dir / f"execution_report_{timestamp}.md"
+    
+    trace = result.get("trace", {})
+    
+    # 如果有完整的 trace 数据，使用详细报告生成
+    if trace:
+        # 构建报告数据
+        report_data = {
+            "agent_name": "Fullstack Project Generator",
+            "query": requirements,
+            "intent": f"生成 {project_name} 项目",
+            "generated_at": datetime.now().isoformat(),
+            "duration_seconds": trace.get("duration_ms", 0) / 1000,
+            "statistics": {
+                "total_steps": len(result.get("generated_files", [])) + 2,
+                "executed_steps": len(result.get("generated_files", [])) + 2,
+                "successful_steps": len(result.get("generated_files", [])) + 2 if result.get("success") else 0,
+                "failed_steps": 0 if result.get("success") else 1,
+                "success_rate": 100.0 if result.get("success") else 0.0,
+            },
+            "steps": [],
+            "final_state": {"generated_files": result.get("generated_files", [])},
+            "mermaid_diagram": "graph TD\n    Start([开始]) --> End([结束])",
+            "errors": [] if result.get("success") else [result.get("error", "未知错误")],
+            "warnings": [],
+            "trace": ExecutionReportGenerator._extract_trace_summary(trace) if trace else {},
+        }
+        
+        # 生成 markdown 报告
+        report = ExecutionReportGenerator.generate_markdown_report(report_data)
+        
+        # 添加项目特定信息
+        extra_info = f"""
+## 项目信息
+
+- **项目名称**: {project_name}
+- **输出目录**: `{result.get("output_dir", "N/A")}`
+
+## 生成文件
+
+"""
+        for f in result.get("generated_files", []):
+            extra_info += f"- `{f}`\n"
+        
+        report = report + "\n" + extra_info
+    else:
+        # 简单报告
+        report = f"""# 全栈项目生成报告
+
+- **项目名称**: {project_name}
+- **生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+- **执行状态**: {"✅ 成功" if result.get("success") else "❌ 失败"}
+
+## 生成文件
+
+"""
+        for f in result.get("generated_files", []):
+            report += f"- `{f}`\n"
+    
+    report_path.write_text(report, encoding="utf-8")
+    return str(report_path)
 
 
 # 预定义的示例需求
@@ -208,6 +284,14 @@ async def main():
             print(f"   - 追踪ID: {trace.get('trace_id', 'N/A')}")
             print(f"   - LLM调用: {llm_calls.get('count', 0)} 次")
             print(f"   - Token消耗: {llm_calls.get('total_tokens', 0):,}")
+        
+        # 生成 markdown 报告
+        report_path = save_execution_report(
+            result=result,
+            requirements=requirements,
+            project_name=project_name,
+        )
+        print(f"\n📝 执行报告: {report_path}")
     else:
         print(f"\n❌ 项目生成失败: {result.get('error', '未知错误')}")
 
