@@ -168,6 +168,7 @@ async def main():
     print("   - 全局一致性检查")
     print("   - 增量重规划")
     print("   - 统一后处理策略 (ToolPostPolicy)")
+    print(f"任务详情： ${requirements}")
     print("\n" + "-" * 70)
 
     # 检查 API Key

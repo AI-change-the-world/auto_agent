@@ -231,10 +231,30 @@ async def tool_analyze_requirements(args: Dict[str, Any]) -> Dict[str, Any]:
 {requirements}
 
 请以 JSON 格式返回:
+请以 JSON 格式返回分析结果:
 {{
-    "entities": [{{"name": "实体名(PascalCase)", "description": "描述", "fields": [{{"name": "字段名", "type": "类型", "required": true}}]}}],
-    "relationships": [{{"from": "实体A", "to": "实体B", "type": "one-to-many", "description": "描述"}}],
-    "business_rules": [{{"rule": "规则描述", "affects": ["相关实体"]}}]
+    "project_name": "项目名称（英文，snake_case）",
+    "description": "项目描述",
+    "entities": [
+        {{
+            "name": "实体名称（英文，PascalCase）",
+            "description": "实体描述",
+            "fields": [
+                {{"name": "字段名", "type": "类型", "required": true/false, "description": "描述"}}
+            ]
+        }}
+    ],
+    "relationships": [
+        {{"from": "实体A", "to": "实体B", "type": "one-to-many/many-to-many/one-to-one", "description": "关系描述"}}
+    ],
+    "business_rules": [
+        {{"rule": "规则描述", "affects": ["相关实体"]}}
+    ],
+    "constraints": [
+        {{"constraint": "约束描述", "type": "validation/security/performance"}}
+    ],
+    "api_style": "REST/GraphQL",
+    "auth_required": true/false
 }}"""
 
     text = await _llm_call(prompt, "analyze_requirements")
@@ -265,11 +285,49 @@ async def tool_design_api(args: Dict[str, Any]) -> Dict[str, Any]:
 实体: {json.dumps(entities, ensure_ascii=False, indent=2)}
 关系: {json.dumps(relationships, ensure_ascii=False, indent=2)}
 
-返回 JSON:
+请以 JSON 格式返回 API 设计:
 {{
-    "endpoints": [{{"path": "/users", "method": "GET", "description": "获取列表"}}],
-    "schemas": {{"UserResponse": {{"type": "object"}}}}
-}}"""
+    "base_path": "/api/v1",
+    "endpoints": [
+        {{
+            "path": "/users",
+            "method": "GET",
+            "description": "获取用户列表",
+            "request_params": {{"page": "int", "size": "int"}},
+            "response_schema": "UserListResponse",
+            "auth_required": true
+        }},
+        {{
+            "path": "/users/{{id}}",
+            "method": "GET",
+            "description": "获取单个用户",
+            "path_params": {{"id": "int"}},
+            "response_schema": "UserResponse",
+            "auth_required": true
+        }}
+    ],
+    "schemas": {{
+        "UserResponse": {{
+            "type": "object",
+            "properties": {{
+                "id": {{"type": "integer"}},
+                "name": {{"type": "string"}}
+            }}
+        }}
+    }},
+    "error_responses": {{
+        "400": "Bad Request",
+        "401": "Unauthorized",
+        "404": "Not Found",
+        "500": "Internal Server Error"
+    }}
+}}
+
+要求:
+1. 为每个实体生成 CRUD 端点
+2. 考虑实体间的关系，生成嵌套资源端点
+3. 使用 RESTful 风格
+4. 所有 ID 参数使用整数类型"""
 
     text = await _llm_call(prompt, "design_api")
     
@@ -298,8 +356,20 @@ async def tool_generate_models(args: Dict[str, Any]) -> Dict[str, Any]:
 实体: {json.dumps(entities, ensure_ascii=False, indent=2)}
 Schema: {json.dumps(schemas, ensure_ascii=False, indent=2)}
 
-要求: Pydantic v2, Create/Update/Response 变体, ID 用 int
-直接输出 Python 代码，用 ```python ``` 包裹。"""
+请生成完整的 Python 代码，包含:
+1. 必要的 import 语句
+2. 基础模型类（BaseModel 配置）
+3. 每个实体的模型类（包含 Create、Update、Response 变体）
+4. 类型注解和字段验证
+5. 文档字符串
+
+代码风格要求:
+- 使用 Pydantic v2 语法
+- 所有字段都要有类型注解
+- 可选字段使用 Optional
+- ID 字段使用 int 类型
+
+请直接输出 Python 代码，用 ```python 和 ``` 包裹。"""
 
     text = await _llm_call(prompt, "generate_models")
     
@@ -329,8 +399,20 @@ async def tool_generate_service(args: Dict[str, Any]) -> Dict[str, Any]:
 端点: {json.dumps(endpoints, ensure_ascii=False, indent=2)}
 实体: {json.dumps(entities, ensure_ascii=False, indent=2)}
 
-要求: async/await, 类型注解, 使用已定义的模型类名
-直接输出 Python 代码，用 ```python ``` 包裹。"""
+请生成完整的服务层 Python 代码，包含:
+1. 必要的 import 语句（从 models 模块导入模型类）
+2. 服务类（每个实体一个服务类）
+3. CRUD 方法实现（使用 async/await）
+4. 类型注解
+5. 错误处理
+
+代码风格要求:
+- 使用依赖注入模式
+- 方法参数和返回值都要有类型注解
+- 使用已定义的模型类名（不要自己创造新的类名）
+- ID 参数使用 int 类型
+
+请直接输出 Python 代码，用 ```python 和 ``` 包裹。"""
 
     text = await _llm_call(prompt, "generate_service")
     
@@ -360,8 +442,22 @@ async def tool_generate_router(args: Dict[str, Any]) -> Dict[str, Any]:
 服务方法: {json.dumps(service_methods)}
 模型类: {json.dumps(model_names)}
 
-要求: FastAPI 依赖注入, async/await, OpenAPI 文档注解
-直接输出 Python 代码，用 ```python ``` 包裹。"""
+请生成完整的 FastAPI 路由 Python 代码，包含:
+1. 必要的 import 语句
+2. APIRouter 实例
+3. 每个端点的路由函数
+4. 依赖注入（服务类）
+5. 请求/响应模型
+6. 错误处理
+
+代码风格要求:
+- 使用 FastAPI 的依赖注入
+- 路由函数使用 async/await
+- 正确使用已定义的模型类和服务方法
+- 添加 OpenAPI 文档注解
+- ID 参数使用 int 类型
+
+请直接输出 Python 代码，用 ```python 和 ``` 包裹。"""
 
     text = await _llm_call(prompt, "generate_router")
     
@@ -388,8 +484,20 @@ async def tool_generate_tests(args: Dict[str, Any]) -> Dict[str, Any]:
 端点: {json.dumps(endpoints, ensure_ascii=False, indent=2)}
 模型类: {json.dumps(model_names)}
 
-要求: pytest + httpx, fixtures, 正向和异常测试
-直接输出 Python 代码，用 ```python ``` 包裹。"""
+请生成完整的 pytest 测试代码，包含:
+1. 必要的 import 语句
+2. pytest fixtures（TestClient、测试数据）
+3. 每个端点的测试函数
+4. 正向测试和异常测试
+5. 断言验证
+
+代码风格要求:
+- 使用 pytest 和 httpx
+- 测试函数命名: test_<method>_<resource>_<scenario>
+- 使用 fixtures 管理测试数据
+- 包含边界条件测试
+
+请直接输出 Python 代码，用 ```python 和 ``` 包裹。"""
 
     text = await _llm_call(prompt, "generate_tests")
     
@@ -442,8 +550,22 @@ async def tool_validate_project(args: Dict[str, Any]) -> Dict[str, Any]:
 路由代码:
 {router_code}
 
-检查: 模型类使用、服务方法调用、类型一致性
-返回 JSON: {{"is_valid": true/false, "issues": [], "summary": "总结"}}"""
+请检查:
+1. 模型类是否在服务和路由中正确使用
+2. 服务方法是否在路由中正确调用
+3. 类型注解是否一致
+4. 是否有未定义的引用
+5. ID 参数类型是否统一为 int
+
+请以 JSON 格式返回验证结果:
+{{
+    "is_valid": true/false,
+    "issues": [
+        {{"severity": "error/warning", "location": "位置", "description": "问题描述"}}
+    ],
+    "suggestions": ["改进建议1", "改进建议2"],
+    "summary": "验证总结"
+}}"""
 
     text = await _llm_call(prompt, "validate_project")
     
@@ -618,7 +740,21 @@ async def run_langchain_fullstack(
 需求描述:
 {requirements}
 
-请按顺序执行所有步骤，每生成一段代码后立即写入文件。
+请按以下步骤执行:
+1. 初始化项目目录 (init_project)
+2. 分析需求，提取实体和关系 (analyze_requirements)
+3. 设计 REST API 端点 (design_api)
+4. 生成 Pydantic 数据模型 (generate_models)，然后用 write_code 写入 models.py
+5. 生成服务层代码 (generate_service)，然后用 write_code 写入 service.py
+6. 生成 FastAPI 路由代码 (generate_router)，然后用 write_code 写入 router.py
+7. 生成测试用例 (generate_tests)，然后用 write_code 写入 test_api.py
+8. 验证项目一致性 (validate_project)
+
+重要规则:
+- 每次生成代码后，必须立即调用 write_code 工具将代码写入文件
+- 各层代码使用一致的类名和方法名
+- 所有 ID 参数使用 int 类型
+- 代码符合 Python 最佳实践
 """
     
     print("\n" + "=" * 70)
@@ -698,13 +834,19 @@ SAMPLE_REQUIREMENTS = {
    - 任务属性（标题、描述、优先级、截止日期）
    - 任务状态（待办、进行中、已完成）
    - 任务分配给成员
+   - 子任务支持
 
 3. 标签系统
    - 创建、编辑、删除标签
    - 任务可以有多个标签
 
-4. 业务规则
+4. 评论和附件
+   - 任务评论
+   - 任务附件上传
+
+5. 业务规则
    - 只有项目成员可以查看/编辑项目内的任务
+   - 完成所有子任务后父任务自动完成
    - 删除项目时删除所有相关任务
 """,
 }

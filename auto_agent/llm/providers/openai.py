@@ -57,7 +57,6 @@ class OpenAIClient(LLMClient):
         self,
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         trace_purpose: Optional[str] = None,
         **kwargs,
     ) -> str:
@@ -67,7 +66,6 @@ class OpenAIClient(LLMClient):
         Args:
             messages: 消息列表
             temperature: 温度参数
-            max_tokens: 最大 token 数
             trace_purpose: 追踪目的（用于 tracing 系统）
             **kwargs: 其他参数 (如 top_p, presence_penalty 等)
 
@@ -84,8 +82,6 @@ class OpenAIClient(LLMClient):
             "stream": True,
             "stream_options": {"include_usage": True},  # 获取 token 统计
         }
-        if max_tokens:
-            params["max_tokens"] = max_tokens
         
         # 合并额外参数
         for key in ["top_p", "presence_penalty", "frequency_penalty", "stop"]:
@@ -131,7 +127,6 @@ class OpenAIClient(LLMClient):
         self,
         messages: List[Dict[str, str]],
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
         **kwargs,
     ) -> AsyncGenerator[str, None]:
         """
@@ -140,7 +135,6 @@ class OpenAIClient(LLMClient):
         Args:
             messages: 消息列表
             temperature: 温度参数
-            max_tokens: 最大 token 数
 
         Yields:
             流式响应片段
@@ -151,8 +145,6 @@ class OpenAIClient(LLMClient):
             "temperature": temperature or self.default_temperature,
             "stream": True,
         }
-        if max_tokens:
-            params["max_tokens"] = max_tokens
 
         stream = await self._client.chat.completions.create(**params)
         

@@ -1371,8 +1371,16 @@ class ExecutionEngine:
         # 3. 压缩当前状态
         state_summary = self._compress_state_for_llm(state)
 
-        # 4. 构建语义驱动的 prompt
+        # 4. 提取原始用户需求（重要！）
+        original_query = ""
+        if "inputs" in state and "query" in state["inputs"]:
+            original_query = state["inputs"]["query"]
+
+        # 5. 构建语义驱动的 prompt
         prompt = f"""你是一个智能参数构造助手。根据执行历史和当前状态，为工具智能构造参数。
+
+【原始用户需求】（最重要！）
+{original_query if original_query else "无"}
 
 【当前步骤】
 工具: {subtask.tool}
@@ -1394,20 +1402,20 @@ class ExecutionEngine:
 {state_summary}
 
 【任务】
-根据执行历史和当前状态，智能决定缺失参数的值。
+根据原始用户需求、执行历史和当前状态，智能决定缺失参数的值。
 
 关键规则：
-1. 仔细阅读每个参数的 description，理解参数的语义用途
-2. 查看执行历史中每一步的"目标"和"描述"，判断哪些步骤的输出与当前参数相关
-3. 参数可能需要从多个步骤的结果中组合（如合并多个搜索结果）
-4. 如果历史步骤的输出类型与参数类型匹配，优先使用
-5. 从 state 中找到语义上最匹配的数据
-6. 如果确实没有合适的数据，可以根据步骤描述推断合理的默认值
+1. **最重要**：如果参数名是 "requirements" 或类似需求描述的参数，应该使用【原始用户需求】中的完整内容
+2. 仔细阅读每个参数的 description，理解参数的语义用途
+3. 查看执行历史中每一步的"目标"和"描述"，判断哪些步骤的输出与当前参数相关
+4. 参数可能需要从多个步骤的结果中组合（如合并多个搜索结果）
+5. 如果历史步骤的输出类型与参数类型匹配，优先使用
+6. 从 state 中找到语义上最匹配的数据
 
 示例思考过程：
+- 参数 "requirements" 需要需求描述 → 使用【原始用户需求】的完整内容
 - 参数 "documents" 需要文档列表 → 查看历史中哪些步骤输出了文档
 - 参数 "query" 需要查询文本 → 可能来自 inputs.query 或之前的分析结果
-- 参数 "outline" 需要大纲 → 查看是否有步骤生成了大纲
 
 请返回 JSON 格式，只包含需要补充的参数：
 ```json

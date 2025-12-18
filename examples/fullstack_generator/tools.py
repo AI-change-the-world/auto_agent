@@ -117,10 +117,11 @@ class AnalyzeRequirementsTool(BaseTool):
     "auth_required": true/false
 }}"""
 
+            print("分析requirement prompt:\n"+ prompt)
+
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=2000,
             )
 
             # 解析 JSON
@@ -275,7 +276,6 @@ class DesignAPITool(BaseTool):
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=8192,
             )
 
             json_match = re.search(r"\{.*\}", response, re.DOTALL)
@@ -385,7 +385,6 @@ API Schema 参考:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=3000,
             )
 
             # 提取代码块
@@ -513,7 +512,6 @@ API 端点:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=3000,
             )
 
             code_match = re.search(r"```python\n(.*?)```", response, re.DOTALL)
@@ -638,7 +636,6 @@ API 端点:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=3000,
             )
 
             code_match = re.search(r"```python\n(.*?)```", response, re.DOTALL)
@@ -749,7 +746,6 @@ API 端点:
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=8192,
             )
 
             code_match = re.search(r"```python\n(.*?)```", response, re.DOTALL)
@@ -869,7 +865,6 @@ class ValidateProjectTool(BaseTool):
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=1500,
             )
 
             json_match = re.search(r"\{.*\}", response, re.DOTALL)
