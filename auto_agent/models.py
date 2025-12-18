@@ -19,6 +19,125 @@ class ValidationMode(Enum):
     STRICT = "strict"  # 严格模式
 
 
+# ==================== 任务复杂度分级 ====================
+
+
+class TaskComplexity(Enum):
+    """任务复杂度等级"""
+
+    SIMPLE = "simple"  # 单步或线性任务（查天气、算数）
+    MODERATE = "moderate"  # 多步但独立（搜索+总结）
+    COMPLEX = "complex"  # 多步且有依赖（研究报告）
+    PROJECT = "project"  # 项目级（写完整项目、重构代码库）
+
+
+@dataclass
+class TaskProfile:
+    """
+    任务画像
+
+    在规划阶段由 LLM 分析用户输入生成，用于决定后续执行策略
+    """
+
+    complexity: TaskComplexity
+    estimated_steps: int
+    has_code_generation: bool  # 是否涉及代码生成
+    has_cross_dependencies: bool  # 步骤间是否有交叉依赖
+    requires_consistency: bool  # 是否需要一致性保证（如接口定义）
+    is_reversible: bool  # 错误是否容易回滚
+    reasoning: str = ""  # LLM 的判断理由
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "complexity": self.complexity.value,
+            "estimated_steps": self.estimated_steps,
+            "has_code_generation": self.has_code_generation,
+            "has_cross_dependencies": self.has_cross_dependencies,
+            "requires_consistency": self.requires_consistency,
+            "is_reversible": self.is_reversible,
+            "reasoning": self.reasoning,
+        }
+
+
+@dataclass
+class ExecutionStrategy:
+    """
+    执行策略
+
+    根据 TaskProfile 决定的全局执行策略
+    """
+
+    # Replan 相关
+    enable_replan: bool = True
+    replan_trigger: str = "on_failure"  # "on_failure" / "periodic" / "proactive"
+    replan_interval: int = 5  # 周期性检查间隔（仅 periodic 模式）
+
+    # 一致性检查相关
+    enable_consistency_check: bool = False
+    consistency_check_on: List[str] = field(
+        default_factory=list
+    )  # ["code_generation", "interface_definition"]
+
+    # 前瞻规划
+    enable_lookahead: bool = False
+
+    # 检查点
+    checkpoint_interval: int = 0  # 0 表示不设检查点
+
+    # 阶段审查（仅 PROJECT 级）
+    require_phase_review: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "enable_replan": self.enable_replan,
+            "replan_trigger": self.replan_trigger,
+            "replan_interval": self.replan_interval,
+            "enable_consistency_check": self.enable_consistency_check,
+            "consistency_check_on": self.consistency_check_on,
+            "enable_lookahead": self.enable_lookahead,
+            "checkpoint_interval": self.checkpoint_interval,
+            "require_phase_review": self.require_phase_review,
+        }
+
+
+# ==================== 工具级 Replan 策略 ====================
+
+
+@dataclass
+class ToolReplanPolicy:
+    """
+    工具级别的 Replan 策略
+
+    允许每个工具定义自己的后处理策略，覆盖全局策略
+    """
+
+    # 执行后是否强制触发 replan 检查
+    force_replan_check: bool = False
+
+    # 执行后是否需要一致性验证
+    requires_consistency_check: bool = False
+
+    # 这个工具的输出是否会影响后续多个步骤（高影响力工具）
+    high_impact: bool = False
+
+    # 自定义的 replan 触发条件（自然语言，让 LLM 判断）
+    # 例: "如果生成的代码超过 100 行，或涉及多个文件"
+    replan_condition: Optional[str] = None
+
+    # 需要与哪些类型的历史步骤做一致性检查
+    # 例: ["interface_definition", "schema_design"]
+    consistency_check_against: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "force_replan_check": self.force_replan_check,
+            "requires_consistency_check": self.requires_consistency_check,
+            "high_impact": self.high_impact,
+            "replan_condition": self.replan_condition,
+            "consistency_check_against": self.consistency_check_against,
+        }
+
+
 # ==================== 消息模型 ====================
 
 
@@ -79,6 +198,10 @@ class ExecutionPlan:
     state_schema: Dict[str, Any] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+
+    # 任务画像和执行策略（阶段一新增）
+    task_profile: Optional["TaskProfile"] = None
+    execution_strategy: Optional["ExecutionStrategy"] = None
 
 
 # ==================== 执行结果模型 ====================
@@ -327,6 +450,9 @@ class ToolDefinition:
 
     # 参数验证器列表：在执行前验证参数有效性
     parameter_validators: List["ParameterValidator"] = field(default_factory=list)
+
+    # === 工具级 Replan 策略 ===
+    replan_policy: Optional["ToolReplanPolicy"] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""

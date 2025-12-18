@@ -20,9 +20,12 @@ from auto_agent.core.context import ExecutionContext
 from auto_agent.llm.client import LLMClient
 from auto_agent.models import (
     ExecutionPlan,
+    ExecutionStrategy,
     FailAction,
     PlanStep,
     SubTaskResult,
+    TaskComplexity,
+    ToolReplanPolicy,
     ValidationMode,
 )
 from auto_agent.retry.controller import RetryController
@@ -235,6 +238,9 @@ class ExecutionEngine:
         current_step_index = 0
         max_iterations = state.get("control", {}).get("max_iterations", 20)
         iterations = 0
+        
+        # 获取执行策略（阶段一新增）
+        execution_strategy = plan.execution_strategy
 
         while current_step_index < len(plan.subtasks) and iterations < max_iterations:
             iterations += 1
@@ -268,6 +274,51 @@ class ExecutionEngine:
                         description=subtask.description,
                     )
                     step_span.__enter__()
+                
+                # 一致性检查（阶段三：在执行前检查与历史检查点的一致性）
+                consistency_violations = []
+                if execution_strategy and self.llm_client and self.context:
+                    # 检查工具是否需要一致性检查
+                    tool_for_check = self.tool_registry.get_tool(subtask.tool) if subtask.tool else None
+                    should_check_consistency = False
+                    if tool_for_check and hasattr(tool_for_check, "definition") and tool_for_check.definition.replan_policy:
+                        policy = tool_for_check.definition.replan_policy
+                        if policy.requires_consistency_check or policy.high_impact:
+                            should_check_consistency = True
+                    # PROJECT 级别总是检查
+                    if execution_strategy.require_phase_review:
+                        should_check_consistency = True
+                    
+                    if should_check_consistency and self.context.consistency_checker.checkpoints:
+                        # 先构造参数用于检查
+                        pre_check_args = await self._build_tool_arguments(subtask, state, tool_for_check) if tool_for_check else {}
+                        consistency_violations = await self._check_consistency(
+                            step=subtask,
+                            arguments=pre_check_args,
+                            state=state,
+                        )
+                        
+                        # 如果有严重违规，发送警告事件
+                        if consistency_violations:
+                            critical_violations = [v for v in consistency_violations if v.severity == "critical"]
+                            if critical_violations:
+                                yield {
+                                    "event": "consistency_violation",
+                                    "data": {
+                                        "step": step_num,
+                                        "step_id": subtask.id,
+                                        "violations": [v.to_dict() for v in critical_violations],
+                                        "severity": "critical",
+                                        "message": f"检测到 {len(critical_violations)} 个严重一致性违规",
+                                    },
+                                }
+                                # 严重违规触发重规划
+                                if enable_tracing:
+                                    trace_flow_event(
+                                        action="consistency_violation",
+                                        reason=f"严重一致性违规: {critical_violations[0].description}",
+                                        from_step=subtask.id,
+                                    )
                 
                 # 执行步骤
                 if tool_executor:
@@ -315,6 +366,41 @@ class ExecutionEngine:
                     success=result.success,
                     error=result.error,
                 )
+
+                # 提取工作记忆（阶段二：对于高影响力工具或复杂任务）
+                # 注册一致性检查点（阶段三：对于高影响力工具）
+                if result.success and execution_strategy:
+                    should_extract = False
+                    should_register_checkpoint = False
+                    # 检查工具级策略
+                    tool = self.tool_registry.get_tool(subtask.tool) if subtask.tool else None
+                    if tool and hasattr(tool, "definition") and tool.definition.replan_policy:
+                        policy = tool.definition.replan_policy
+                        if policy.high_impact:
+                            should_extract = True
+                            should_register_checkpoint = True
+                        # 检查是否需要一致性检查
+                        if policy.requires_consistency_check:
+                            should_register_checkpoint = True
+                    # 检查全局策略（PROJECT 级别总是提取）
+                    if execution_strategy.require_phase_review:
+                        should_extract = True
+                        should_register_checkpoint = True
+                    
+                    if should_extract and self.llm_client:
+                        await self._extract_working_memory(
+                            step=subtask,
+                            result=result,
+                            state=state,
+                        )
+                    
+                    # 注册一致性检查点（阶段三新增）
+                    if should_register_checkpoint and self.llm_client:
+                        await self._register_consistency_checkpoint(
+                            step=subtask,
+                            result=result,
+                            state=state,
+                        )
 
                 # 发送步骤完成事件
                 yield {
@@ -409,21 +495,35 @@ class ExecutionEngine:
                     )
                 )
 
-            # 每步执行后检查是否需要重规划
-            # Requirements: 7.1, 7.3
-            if len(results) >= 3:  # 至少有 3 次执行记录才检查
+            # 每步执行后检查是否需要重规划（使用策略系统）
+            should_check, check_reason = await self._should_trigger_replan(
+                step=subtask,
+                result=result,
+                execution_strategy=execution_strategy,
+                current_step_index=current_step_index,
+                results=results,
+            )
+
+            if should_check:
                 new_plan = await self.evaluate_and_replan(
                     current_plan=plan,
                     execution_history=results,
                     state=state,
+                    current_step_index=current_step_index,
+                    use_incremental=True,  # 默认使用增量重规划
                 )
 
                 if new_plan is not None:
+                    # 保留原计划的 task_profile 和 execution_strategy
+                    new_plan.task_profile = plan.task_profile
+                    new_plan.execution_strategy = plan.execution_strategy
+
                     # 发送重规划事件通知
                     yield {
                         "event": "stage_replan",
                         "data": {
                             "step": step_num,
+                            "trigger_reason": check_reason,
                             "reason": new_plan.warnings[0]
                             if new_plan.warnings
                             else "检测到执行问题，触发重规划",
@@ -1861,12 +1961,474 @@ class ExecutionEngine:
             # LLM 调用失败，返回 None
             return None
 
+    async def _should_trigger_replan(
+        self,
+        step: PlanStep,
+        result: SubTaskResult,
+        execution_strategy: Optional[ExecutionStrategy],
+        current_step_index: int,
+        results: List[SubTaskResult],
+    ) -> Tuple[bool, str]:
+        """
+        判断是否需要触发 replan 检查
+
+        优先级：工具级策略 > 全局周期性策略 > 失败触发
+
+        Args:
+            step: 当前步骤
+            result: 执行结果
+            execution_strategy: 全局执行策略
+            current_step_index: 当前步骤索引
+            results: 执行历史
+
+        Returns:
+            (should_replan, reason): 是否需要 replan 及原因
+        """
+        # 获取工具级策略
+        tool = self.tool_registry.get_tool(step.tool) if step.tool else None
+        policy: Optional[ToolReplanPolicy] = None
+        if tool and hasattr(tool, "definition") and tool.definition.replan_policy:
+            policy = tool.definition.replan_policy
+
+        # 1. 工具级强制检查（最高优先级）
+        if policy and policy.force_replan_check:
+            # 如果有自定义条件，让 LLM 判断
+            if policy.replan_condition and self.llm_client:
+                should_replan = await self._evaluate_replan_condition(
+                    condition=policy.replan_condition,
+                    result=result,
+                    step=step,
+                )
+                if should_replan:
+                    return True, f"工具 {step.tool} 触发条件满足: {policy.replan_condition}"
+            else:
+                # 没有条件，直接触发检查
+                return True, f"工具 {step.tool} 配置了强制 replan 检查"
+
+        # 2. 如果全局策略禁用了 replan，直接返回
+        if execution_strategy and not execution_strategy.enable_replan:
+            return False, "全局策略禁用了 replan"
+
+        # 3. 全局周期性检查
+        if execution_strategy and execution_strategy.replan_trigger == "periodic":
+            interval = execution_strategy.replan_interval
+            if interval > 0 and (current_step_index + 1) % interval == 0:
+                # 但如果当前工具是简单工具（非高影响力），可以跳过
+                if policy and not policy.high_impact:
+                    return False, "简单工具，跳过周期性检查"
+                return True, f"周期性检查（每 {interval} 步）"
+
+        # 4. 主动规划模式（PROJECT 级）
+        if execution_strategy and execution_strategy.replan_trigger == "proactive":
+            # 高影响力工具执行后强制检查
+            if policy and policy.high_impact:
+                return True, f"高影响力工具 {step.tool} 执行后主动检查"
+
+        # 5. 失败触发（所有任务都适用）
+        if not result.success:
+            if execution_strategy and execution_strategy.replan_trigger == "on_failure":
+                return True, "执行失败触发 replan"
+            # 即使不是 on_failure 模式，连续失败也应该触发
+            recent_failures = sum(1 for r in results[-3:] if not r.success)
+            if recent_failures >= 2:
+                return True, f"连续 {recent_failures} 次失败"
+
+        return False, ""
+
+    async def _extract_working_memory(
+        self,
+        step: PlanStep,
+        result: SubTaskResult,
+        state: Dict[str, Any],
+    ) -> None:
+        """
+        从步骤执行结果中提取工作记忆
+
+        让 LLM 分析步骤输出，提取：
+        - 设计决策
+        - 约束条件
+        - 待办事项
+        - 接口定义
+
+        Args:
+            step: 执行的步骤
+            result: 执行结果
+            state: 当前状态
+        """
+        if not self.llm_client or not self.context:
+            return
+
+        import json
+
+        # 构建提取 prompt
+        prompt = f"""分析这一步的执行结果，提取需要后续步骤遵守的信息。
+
+【步骤信息】
+工具: {step.tool}
+描述: {step.description}
+
+【执行结果】
+{json.dumps(result.output, ensure_ascii=False, default=str)[:2000] if result.output else "无输出"}
+
+【任务】
+从执行结果中提取以下信息（如果有的话）：
+
+1. 设计决策：这一步做出了什么重要决定？（如选择了某种架构、确定了某种方案）
+2. 约束条件：后续步骤必须遵守什么规则？（如命名规范、接口约定、类型要求）
+3. 待办事项：这一步产生了什么需要后续处理的任务？（如需要更新文档、需要添加测试）
+4. 接口定义：这一步定义了什么接口/契约？（如函数签名、API 格式、数据结构）
+
+请返回 JSON（只包含有内容的字段）：
+```json
+{{
+    "decisions": [
+        {{"decision": "决策内容", "reason": "决策理由"}}
+    ],
+    "constraints": [
+        {{"constraint": "约束内容", "priority": "critical/high/normal/low"}}
+    ],
+    "todos": [
+        {{"todo": "待办内容", "priority": "high/normal/low"}}
+    ],
+    "interfaces": [
+        {{"name": "接口名", "type": "function/api/schema", "definition": {{...}}}}
+    ]
+}}
+```
+
+如果没有需要提取的信息，返回空对象 {{}}"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                trace_purpose="extract_working_memory",
+            )
+
+            # 提取 JSON
+            import re
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+
+            data = json.loads(response)
+
+            # 添加到工作记忆
+            wm = self.context.working_memory
+
+            for d in data.get("decisions", []):
+                wm.add_decision(
+                    decision=d.get("decision", ""),
+                    reason=d.get("reason", ""),
+                    step_id=step.id,
+                )
+
+            for c in data.get("constraints", []):
+                wm.add_constraint(
+                    constraint=c.get("constraint", ""),
+                    source=step.id,
+                    priority=c.get("priority", "normal"),
+                )
+
+            for t in data.get("todos", []):
+                wm.add_todo(
+                    todo=t.get("todo", ""),
+                    created_by=step.id,
+                    priority=t.get("priority", "normal"),
+                )
+
+            for iface in data.get("interfaces", []):
+                wm.add_interface(
+                    name=iface.get("name", ""),
+                    definition=iface.get("definition", {}),
+                    defined_by=step.id,
+                    interface_type=iface.get("type", "function"),
+                )
+
+        except Exception:
+            # 提取失败不影响主流程
+            pass
+
+    async def _evaluate_replan_condition(
+        self,
+        condition: str,
+        result: SubTaskResult,
+        step: PlanStep,
+    ) -> bool:
+        """
+        使用 LLM 评估自定义的 replan 条件
+
+        Args:
+            condition: 自然语言条件描述
+            result: 执行结果
+            step: 当前步骤
+
+        Returns:
+            是否满足条件
+        """
+        if not self.llm_client:
+            return False
+
+        import json
+
+        prompt = f"""判断以下条件是否满足。
+
+【条件】
+{condition}
+
+【步骤信息】
+工具: {step.tool}
+描述: {step.description}
+
+【执行结果】
+成功: {result.success}
+输出: {json.dumps(result.output, ensure_ascii=False, default=str)[:1000] if result.output else "无"}
+错误: {result.error or "无"}
+
+请判断条件是否满足，只返回 "yes" 或 "no"。"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                trace_purpose="replan_condition",
+            )
+            return response.strip().lower() in ["yes", "是", "true", "满足"]
+        except Exception:
+            return False
+
+    # ==================== 一致性检查（阶段三）====================
+
+    async def _register_consistency_checkpoint(
+        self,
+        step: PlanStep,
+        result: SubTaskResult,
+        state: Dict[str, Any],
+    ) -> None:
+        """
+        注册一致性检查点
+
+        在高影响力工具执行后，提取关键元素并注册为检查点，
+        供后续步骤进行一致性检查。
+
+        Args:
+            step: 执行的步骤
+            result: 执行结果
+            state: 当前状态
+        """
+        if not self.llm_client or not self.context:
+            return
+
+        import json
+
+        # 构建提取 prompt
+        prompt = f"""分析这一步的执行结果，提取需要后续步骤保持一致的关键元素。
+
+【步骤信息】
+工具: {step.tool}
+描述: {step.description}
+
+【执行结果】
+{json.dumps(result.output, ensure_ascii=False, default=str)[:2000] if result.output else "无输出"}
+
+【任务】
+从执行结果中提取以下信息：
+
+1. 产物类型：这一步产出了什么类型的内容？
+   - code: 代码（函数、类、模块）
+   - interface: 接口定义（API、函数签名）
+   - schema: 数据结构定义
+   - config: 配置文件
+   - document: 文档（大纲、报告）
+
+2. 关键元素：后续步骤需要保持一致的关键信息
+   - 如果是代码：函数名、参数列表、返回类型
+   - 如果是接口：端点、请求/响应格式
+   - 如果是文档：章节结构、关键术语
+
+3. 后续约束：后续步骤必须遵守的规则
+
+请返回 JSON：
+```json
+{{
+    "artifact_type": "code/interface/schema/config/document",
+    "description": "简短描述这个检查点",
+    "key_elements": {{
+        "names": ["函数名/接口名/..."],
+        "signatures": {{"name": "签名"}},
+        "structure": {{...}}
+    }},
+    "constraints": [
+        "后续步骤必须遵守的约束1",
+        "后续步骤必须遵守的约束2"
+    ]
+}}
+```
+
+如果这一步没有产出需要保持一致的内容，返回 {{"skip": true}}"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                trace_purpose="register_checkpoint",
+            )
+
+            # 提取 JSON
+            import re
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+
+            data = json.loads(response)
+
+            # 如果标记跳过，不注册
+            if data.get("skip"):
+                return
+
+            # 注册检查点
+            self.context.consistency_checker.register_checkpoint(
+                step_id=step.id,
+                artifact_type=data.get("artifact_type", "unknown"),
+                key_elements=data.get("key_elements", {}),
+                constraints_for_future=data.get("constraints", []),
+                description=data.get("description", step.description),
+            )
+
+        except Exception:
+            # 注册失败不影响主流程
+            pass
+
+    async def _check_consistency(
+        self,
+        step: PlanStep,
+        arguments: Dict[str, Any],
+        state: Dict[str, Any],
+    ) -> List["ConsistencyViolation"]:
+        """
+        检查当前步骤与历史检查点的一致性
+
+        在执行步骤前调用，检查参数和意图是否与之前的检查点一致。
+
+        Args:
+            step: 即将执行的步骤
+            arguments: 构造的参数
+            state: 当前状态
+
+        Returns:
+            违规列表
+        """
+        from auto_agent.core.context import ConsistencyViolation
+
+        if not self.llm_client or not self.context:
+            return []
+
+        checker = self.context.consistency_checker
+        checkpoints = checker.get_relevant_checkpoints()
+
+        if not checkpoints:
+            return []
+
+        import json
+
+        # 构建检查 prompt
+        checkpoints_text = []
+        for cp in checkpoints:
+            cp_text = f"""
+[{cp.step_id}] 类型: {cp.artifact_type}
+描述: {cp.description}
+关键元素: {json.dumps(cp.key_elements, ensure_ascii=False)[:500]}
+约束: {', '.join(cp.constraints_for_future[:3])}"""
+            checkpoints_text.append(cp_text)
+
+        prompt = f"""检查当前步骤是否与之前的检查点保持一致。
+
+【历史检查点】
+{''.join(checkpoints_text)}
+
+【当前步骤】
+工具: {step.tool}
+描述: {step.description}
+参数: {json.dumps(arguments, ensure_ascii=False, default=str)[:1000]}
+
+【任务】
+检查当前步骤是否违反了历史检查点的约束或与关键元素不一致。
+
+可能的违规类型：
+- interface_mismatch: 接口不匹配（函数签名、参数类型不一致）
+- naming_conflict: 命名冲突（使用了不一致的命名）
+- constraint_violation: 违反约束（违反了之前定义的规则）
+- structure_inconsistency: 结构不一致（数据结构、文档结构不一致）
+
+请返回 JSON：
+```json
+{{
+    "violations": [
+        {{
+            "checkpoint_id": "违反的检查点步骤ID",
+            "violation_type": "interface_mismatch/naming_conflict/constraint_violation/structure_inconsistency",
+            "severity": "critical/warning/info",
+            "description": "违规描述",
+            "suggestion": "修正建议"
+        }}
+    ]
+}}
+```
+
+如果没有违规，返回 {{"violations": []}}"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.1,
+                trace_purpose="check_consistency",
+            )
+
+            # 提取 JSON
+            import re
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+
+            data = json.loads(response)
+
+            violations = []
+            for v in data.get("violations", []):
+                violation = checker.add_violation(
+                    checkpoint_id=v.get("checkpoint_id", "unknown"),
+                    current_step_id=step.id,
+                    violation_type=v.get("violation_type", "unknown"),
+                    severity=v.get("severity", "warning"),
+                    description=v.get("description", ""),
+                    suggestion=v.get("suggestion", ""),
+                )
+                violations.append(violation)
+
+            return violations
+
+        except Exception:
+            return []
+
     async def evaluate_and_replan(
         self,
         current_plan: ExecutionPlan,
         execution_history: List[SubTaskResult],
         state: Dict[str, Any],
         context_changed: bool = False,
+        current_step_index: int = 0,
+        use_incremental: bool = True,
     ) -> Optional[ExecutionPlan]:
         """
         评估当前计划有效性，必要时动态重规划
@@ -1881,13 +2443,15 @@ class ExecutionEngine:
             execution_history: 执行历史记录列表
             state: 当前状态字典
             context_changed: 上下文是否发生变化
+            current_step_index: 当前步骤索引（用于增量重规划）
+            use_incremental: 是否使用增量重规划（默认 True）
 
         Returns:
             新的执行计划（如果需要重规划），否则返回 None
 
         Requirements: 7.1, 7.2, 7.3
         """
-        # 如果上下文发生变化，强制重规划
+        # 如果上下文发生变化，强制全量重规划
         if context_changed:
             patterns = [
                 ExecutionPattern(
@@ -1923,10 +2487,204 @@ class ExecutionEngine:
         if not problem_patterns:
             return None
 
-        # 生成替代计划
-        return await self._generate_alternative_plan(
-            current_plan, problem_patterns, state, execution_history
+        # 判断是否使用增量重规划
+        # 严重问题（如架构错误、循环依赖）使用全量重规划
+        has_severe_issue = any(
+            p.pattern_type == PatternType.CIRCULAR_DEPENDENCY for p in problem_patterns
         )
+
+        if use_incremental and not has_severe_issue and current_step_index > 0:
+            # 使用增量重规划
+            return await self._incremental_replan(
+                current_plan=current_plan,
+                current_step_index=current_step_index,
+                problem_description=problem_patterns[0].description,
+                state=state,
+                execution_history=execution_history,
+            )
+        else:
+            # 使用全量重规划
+            return await self._generate_alternative_plan(
+                current_plan, problem_patterns, state, execution_history
+            )
+
+    async def _incremental_replan(
+        self,
+        current_plan: ExecutionPlan,
+        current_step_index: int,
+        problem_description: str,
+        state: Dict[str, Any],
+        execution_history: List[SubTaskResult],
+    ) -> Optional[ExecutionPlan]:
+        """
+        增量式重规划（阶段四）
+
+        只调整后续步骤，保留已完成的工作。
+
+        Args:
+            current_plan: 当前执行计划
+            current_step_index: 当前步骤索引
+            problem_description: 问题描述
+            state: 当前状态字典
+            execution_history: 执行历史记录
+
+        Returns:
+            新的执行计划（保留已完成步骤），如果无法生成则返回 None
+        """
+        import json
+
+        if not self.llm_client:
+            return None
+
+        # 分离已完成步骤和待执行步骤
+        completed_steps = current_plan.subtasks[:current_step_index]
+        remaining_steps = current_plan.subtasks[current_step_index:]
+
+        # 构建已完成步骤摘要
+        completed_summary = []
+        for i, step in enumerate(completed_steps):
+            # 找到对应的执行结果
+            result = next((r for r in execution_history if r.step_id == step.id), None)
+            completed_summary.append({
+                "step": i + 1,
+                "id": step.id,
+                "tool": step.tool,
+                "description": step.description,
+                "success": result.success if result else "unknown",
+                "output_keys": list(result.output.keys())[:5] if result and result.output else [],
+            })
+
+        # 构建待执行步骤摘要
+        remaining_summary = []
+        for i, step in enumerate(remaining_steps):
+            remaining_summary.append({
+                "step": current_step_index + i + 1,
+                "id": step.id,
+                "tool": step.tool,
+                "description": step.description,
+            })
+
+        # 获取工作记忆上下文
+        working_memory_context = ""
+        if self.context:
+            working_memory_context = self.context.working_memory.get_relevant_context("")
+            consistency_context = self.context.consistency_checker.get_context_for_llm()
+            if consistency_context:
+                working_memory_context += "\n\n" + consistency_context
+
+        # 获取可用工具列表
+        tools_catalog = (
+            self.tool_registry.get_tools_catalog()
+            if self.tool_registry
+            else "无可用工具信息"
+        )
+
+        # 构建 LLM prompt
+        prompt = f"""你是一个智能任务规划器。当前执行计划遇到了问题，需要调整后续步骤。
+
+【重要】这是增量式重规划，必须保留已完成的步骤，只调整后续步骤。
+
+【问题描述】
+{problem_description}
+
+【已完成的步骤】（必须保留，不能修改）
+{json.dumps(completed_summary, ensure_ascii=False, indent=2)}
+
+【原计划中待执行的步骤】（需要调整）
+{json.dumps(remaining_summary, ensure_ascii=False, indent=2)}
+
+【当前状态摘要】
+{self._compress_state_for_llm(state)}
+
+【工作记忆】
+{working_memory_context if working_memory_context else "无"}
+
+【可用工具】
+{tools_catalog}
+
+【任务】
+基于已完成步骤的产出，重新规划后续步骤来完成原始目标。
+
+要求：
+1. 必须利用已完成步骤的产出（不要重复执行）
+2. 新步骤的 read_fields 应该引用已完成步骤写入的字段
+3. 避免重复之前失败的步骤
+4. 如果某个工具多次失败，考虑使用替代工具
+5. 确保新计划能够完成原始目标
+
+请返回 JSON 格式的新计划（只包含新的后续步骤）：
+```json
+{{
+    "analysis": "问题分析和调整理由",
+    "new_steps": [
+        {{
+            "step": {current_step_index + 1},
+            "name": "工具名称",
+            "description": "步骤描述",
+            "read_fields": ["需要读取的字段（包括已完成步骤的产出）"],
+            "write_fields": ["将写入的字段"],
+            "expectations": "期望结果",
+            "on_fail_strategy": "失败策略"
+        }}
+    ],
+    "expected_outcome": "预期结果"
+}}
+```"""
+
+        try:
+            response = await self.llm_client.chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.3,
+                trace_purpose="incremental_replan",
+            )
+
+            # 提取 JSON
+            import re
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+
+            data = json.loads(response)
+
+            # 构建新的步骤列表
+            new_steps = []
+            for step_data in data.get("new_steps", []):
+                new_step = PlanStep(
+                    id=f"replan_{step_data.get('step', len(completed_steps) + len(new_steps) + 1)}",
+                    description=step_data.get("description", ""),
+                    tool=step_data.get("name"),
+                    parameters=step_data.get("parameters", {}),
+                    dependencies=[],
+                    expectations=step_data.get("expectations"),
+                    on_fail_strategy=step_data.get("on_fail_strategy", "retry"),
+                    read_fields=step_data.get("read_fields", []),
+                    write_fields=step_data.get("write_fields", []),
+                )
+                new_steps.append(new_step)
+
+            if not new_steps:
+                return None
+
+            # 合并已完成步骤和新步骤
+            all_steps = list(completed_steps) + new_steps
+
+            # 创建新计划
+            new_plan = ExecutionPlan(
+                intent=current_plan.intent,
+                subtasks=all_steps,
+                expected_outcome=data.get("expected_outcome", current_plan.expected_outcome),
+                warnings=[f"增量重规划: {data.get('analysis', problem_description)}"],
+            )
+
+            return new_plan
+
+        except Exception:
+            # 增量重规划失败，回退到全量重规划
+            return None
 
     def _validate_parameters(
         self,

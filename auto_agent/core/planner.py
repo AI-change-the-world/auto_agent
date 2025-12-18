@@ -6,12 +6,21 @@ TaskPlanner（任务规划器）
 - 支持固定步骤（is_pinned）
 - 生成 state schema
 - 失败后重规划
+- 任务复杂度分级（阶段一新增）
 """
 
+import json
+import re
 from typing import Any, Dict, List, Optional
 
 from auto_agent.llm.client import LLMClient
-from auto_agent.models import ExecutionPlan, PlanStep
+from auto_agent.models import (
+    ExecutionPlan,
+    ExecutionStrategy,
+    PlanStep,
+    TaskComplexity,
+    TaskProfile,
+)
 from auto_agent.tools.registry import ToolRegistry
 
 
@@ -31,11 +40,181 @@ class TaskPlanner:
         tool_registry: ToolRegistry,
         agent_goals: Optional[List[str]] = None,
         agent_constraints: Optional[List[str]] = None,
+        enable_task_profiling: bool = True,
     ):
         self.llm_client = llm_client
         self.tool_registry = tool_registry
         self.agent_goals = agent_goals or []
         self.agent_constraints = agent_constraints or []
+        self.enable_task_profiling = enable_task_profiling
+
+    async def classify_task_complexity(self, query: str) -> TaskProfile:
+        """
+        分析任务复杂度
+
+        在规划前调用，用于决定后续执行策略
+
+        Args:
+            query: 用户查询
+
+        Returns:
+            TaskProfile: 任务画像
+        """
+        prompt = f"""分析用户任务的复杂度。
+
+【用户输入】
+{query}
+
+【分类标准】
+1. SIMPLE: 单步完成，无依赖（查询、计算、简单问答）
+   - 例: "今天天气怎么样"、"计算 1+1"、"翻译这句话"
+2. MODERATE: 2-5步，步骤间弱依赖（搜索+总结、翻译+润色）
+   - 例: "搜索 X 并总结"、"分析这段代码并给出建议"
+3. COMPLEX: 5-15步，有明确依赖链（研究报告、数据分析流程）
+   - 例: "写一篇关于 X 的研究报告"、"分析这个数据集并生成可视化"
+4. PROJECT: 15+步，多文件/多模块，需要架构设计（写项目、重构代码）
+   - 例: "帮我写一个 TODO 应用"、"重构这个代码库"
+
+【关键判断点】
+- 是否涉及代码生成？（代码有语法/类型约束，错误成本高）
+- 是否有多个产出物需要互相引用？（如多个文件互相 import）
+- 错误是否容易发现和修复？（文档错误容易改，架构错误难改）
+- 步骤之间是否有强依赖？（后续步骤依赖前面步骤的输出）
+
+请返回 JSON:
+{{
+    "complexity": "simple/moderate/complex/project",
+    "estimated_steps": 数字,
+    "has_code_generation": true/false,
+    "has_cross_dependencies": true/false,
+    "requires_consistency": true/false,
+    "is_reversible": true/false,
+    "reasoning": "判断理由（简短）"
+}}"""
+
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "你是一个任务分析专家，请返回有效的 JSON 格式。",
+                },
+                {"role": "user", "content": prompt},
+            ]
+
+            response = await self.llm_client.chat(
+                messages, temperature=0.1, trace_purpose="task_classify"
+            )
+
+            # 提取 JSON
+            json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+            if json_match:
+                response = json_match.group(1)
+            else:
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
+                if json_match:
+                    response = json_match.group()
+
+            data = json.loads(response)
+
+            # 解析复杂度
+            complexity_str = data.get("complexity", "moderate").lower()
+            complexity_map = {
+                "simple": TaskComplexity.SIMPLE,
+                "moderate": TaskComplexity.MODERATE,
+                "complex": TaskComplexity.COMPLEX,
+                "project": TaskComplexity.PROJECT,
+            }
+            complexity = complexity_map.get(complexity_str, TaskComplexity.MODERATE)
+
+            return TaskProfile(
+                complexity=complexity,
+                estimated_steps=data.get("estimated_steps", 3),
+                has_code_generation=data.get("has_code_generation", False),
+                has_cross_dependencies=data.get("has_cross_dependencies", False),
+                requires_consistency=data.get("requires_consistency", False),
+                is_reversible=data.get("is_reversible", True),
+                reasoning=data.get("reasoning", ""),
+            )
+
+        except Exception as e:
+            # Fallback: 返回默认的 MODERATE 级别
+            return TaskProfile(
+                complexity=TaskComplexity.MODERATE,
+                estimated_steps=3,
+                has_code_generation=False,
+                has_cross_dependencies=False,
+                requires_consistency=False,
+                is_reversible=True,
+                reasoning=f"分类失败，使用默认值: {str(e)}",
+            )
+
+    def get_execution_strategy(self, profile: TaskProfile) -> ExecutionStrategy:
+        """
+        根据任务画像选择执行策略
+
+        Args:
+            profile: 任务画像
+
+        Returns:
+            ExecutionStrategy: 执行策略
+        """
+        if profile.complexity == TaskComplexity.SIMPLE:
+            return ExecutionStrategy(
+                enable_replan=False,
+                replan_trigger="on_failure",
+                replan_interval=0,
+                enable_consistency_check=False,
+                consistency_check_on=[],
+                enable_lookahead=False,
+                checkpoint_interval=0,
+                require_phase_review=False,
+            )
+
+        elif profile.complexity == TaskComplexity.MODERATE:
+            return ExecutionStrategy(
+                enable_replan=True,
+                replan_trigger="on_failure",  # 只在失败时触发
+                replan_interval=0,
+                enable_consistency_check=False,
+                consistency_check_on=[],
+                enable_lookahead=False,
+                checkpoint_interval=0,
+                require_phase_review=False,
+            )
+
+        elif profile.complexity == TaskComplexity.COMPLEX:
+            consistency_on = []
+            if profile.has_code_generation:
+                consistency_on.append("code_generation")
+            if profile.requires_consistency:
+                consistency_on.append("interface_definition")
+
+            return ExecutionStrategy(
+                enable_replan=True,
+                replan_trigger="periodic",  # 周期性检查
+                replan_interval=3,  # 每 3 步检查一次
+                enable_consistency_check=profile.requires_consistency,
+                consistency_check_on=consistency_on,
+                enable_lookahead=False,
+                checkpoint_interval=5,
+                require_phase_review=False,
+            )
+
+        else:  # PROJECT
+            return ExecutionStrategy(
+                enable_replan=True,
+                replan_trigger="proactive",  # 主动规划
+                replan_interval=3,
+                enable_consistency_check=True,
+                consistency_check_on=[
+                    "code_generation",
+                    "interface_definition",
+                    "config_change",
+                ],
+                enable_lookahead=True,
+                checkpoint_interval=3,
+                require_phase_review=True,
+            )
 
     async def plan(
         self,
@@ -43,6 +222,7 @@ class TaskPlanner:
         user_context: str,
         conversation_context: str,
         initial_plan: Optional[List[Dict[str, Any]]] = None,
+        skip_profiling: bool = False,
     ) -> ExecutionPlan:
         """
         生成执行计划
@@ -56,10 +236,19 @@ class TaskPlanner:
             user_context: 用户长期记忆上下文
             conversation_context: 对话短期记忆上下文
             initial_plan: 初始计划（含固定步骤）
+            skip_profiling: 是否跳过任务分类（用于 replan 场景）
 
         Returns:
             ExecutionPlan
         """
+        # Step 0: 任务复杂度分类（阶段一新增）
+        task_profile = None
+        execution_strategy = None
+
+        if self.enable_task_profiling and not skip_profiling:
+            task_profile = await self.classify_task_complexity(query)
+            execution_strategy = self.get_execution_strategy(task_profile)
+
         # 提取固定步骤
         pinned_steps = []
         if initial_plan:
@@ -73,6 +262,8 @@ class TaskPlanner:
                 intent="fixed",
                 subtasks=[self._dict_to_plan_step(s) for s in initial_plan],
                 state_schema={},
+                task_profile=task_profile,
+                execution_strategy=execution_strategy,
             )
 
         # 获取工具目录
@@ -120,6 +311,8 @@ class TaskPlanner:
                 state_schema=state_schema,
                 errors=errors,
                 warnings=warnings,
+                task_profile=task_profile,
+                execution_strategy=execution_strategy,
             )
 
         except Exception as e:
@@ -135,6 +328,8 @@ class TaskPlanner:
                     )
                 ],
                 errors=[f"规划失败: {str(e)}"],
+                task_profile=task_profile,
+                execution_strategy=execution_strategy,
             )
 
     async def replan(
@@ -161,8 +356,6 @@ class TaskPlanner:
             新的执行计划
         """
         # 构建重规划提示词
-        import json
-
         history_summary = json.dumps(
             [
                 {"step": r.step_id, "success": r.success, "error": r.error}
@@ -280,11 +473,7 @@ class TaskPlanner:
             {"role": "user", "content": prompt},
         ]
 
-        response = await self.llm_client.chat(messages)
-
-        # 解析 JSON
-        import json
-        import re
+        response = await self.llm_client.chat(messages, trace_purpose="planning")
 
         # 尝试提取 JSON
         json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)

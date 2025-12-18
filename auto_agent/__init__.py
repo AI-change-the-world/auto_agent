@@ -40,13 +40,17 @@ from auto_agent.memory.working import WorkingMemory
 from auto_agent.models import (
     AgentResponse,
     ExecutionPlan,
+    ExecutionStrategy,
     FailAction,
     Message,
     PlanStep,
     StepResultData,
     SubTaskResult,
+    TaskComplexity,
+    TaskProfile,
     ToolDefinition,
     ToolParameter,
+    ToolReplanPolicy,
     ValidationMode,
 )
 from auto_agent.retry.models import RetryConfig, RetryStrategy
@@ -117,10 +121,14 @@ __all__ = [
     "PlanStep",
     "StepResultData",
     "ExecutionPlan",
+    "ExecutionStrategy",
     "SubTaskResult",
     "AgentResponse",
     "FailAction",
     "ValidationMode",
+    "TaskComplexity",
+    "TaskProfile",
+    "ToolReplanPolicy",
     # 重试
     "RetryConfig",
     "RetryStrategy",
