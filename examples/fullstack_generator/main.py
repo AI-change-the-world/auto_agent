@@ -43,16 +43,55 @@ def save_execution_report(
 ) -> str:
     """使用框架内置的报告生成器保存执行报告"""
     from auto_agent.core.report.generator import ExecutionReportGenerator
+    from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
     
     output_dir = Path(result.get("output_dir", "."))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = output_dir / f"execution_report_{timestamp}.md"
     
     trace = result.get("trace", {})
+    trace_full = result.get("trace_full", {})
+    checkpoints = result.get("checkpoints", [])
+    working_memory = result.get("working_memory", {})
+    violations = result.get("consistency_violations", [])
+    plan = result.get("plan")
+    results = result.get("results", [])
     
-    # 如果有完整的 trace 数据，使用详细报告生成
-    if trace:
-        # 构建报告数据
+    # 如果有完整的执行数据，使用完整报告生成
+    if plan and results:
+        # 使用完整的报告生成
+        report_data = ExecutionReportGenerator.generate_report_data(
+            agent_name="Fullstack Project Generator",
+            query=requirements,
+            plan=plan,
+            results=results,
+            state={"generated_files": result.get("generated_files", [])},
+            trace_data=trace,
+            checkpoints=checkpoints,
+            working_memory=working_memory,
+            consistency_violations=violations,
+        )
+        
+        # 生成 markdown 报告
+        report = ExecutionReportGenerator.generate_markdown_report(report_data)
+        
+        # 添加项目特定信息
+        extra_info = f"""
+## 项目信息
+
+- **项目名称**: {project_name}
+- **输出目录**: `{result.get("output_dir", "N/A")}`
+
+## 生成文件
+
+"""
+        for f in result.get("generated_files", []):
+            extra_info += f"- `{f}`\n"
+        
+        report = report + "\n" + extra_info
+        
+    elif trace:
+        # 只有 trace 数据时的简化报告
         report_data = {
             "agent_name": "Fullstack Project Generator",
             "query": requirements,
@@ -72,6 +111,9 @@ def save_execution_report(
             "errors": [] if result.get("success") else [result.get("error", "未知错误")],
             "warnings": [],
             "trace": ExecutionReportGenerator._extract_trace_summary(trace) if trace else {},
+            "checkpoints": checkpoints,
+            "working_memory": working_memory,
+            "consistency_violations": violations,
         }
         
         # 生成 markdown 报告
@@ -106,6 +148,36 @@ def save_execution_report(
             report += f"- `{f}`\n"
     
     report_path.write_text(report, encoding="utf-8")
+    
+    # 如果有完整的 trace 数据，也生成详细报告
+    if trace_full:
+        detailed_report_path = output_dir / f"execution_report_detailed_{timestamp}.md"
+        
+        # 构建详细报告数据
+        if plan and results:
+            detailed_report_data = ExecutionReportGenerator.generate_report_data(
+                agent_name="Fullstack Project Generator",
+                query=requirements,
+                plan=plan,
+                results=results,
+                state={"generated_files": result.get("generated_files", [])},
+                trace_data=trace_full,
+                checkpoints=checkpoints,
+                working_memory=working_memory,
+                consistency_violations=violations,
+            )
+        else:
+            detailed_report_data = report_data.copy() if 'report_data' in dir() else {}
+        
+        detailed_report = ExecutionReportGenerator.generate_detailed_markdown_report(
+            detailed_report_data,
+            trace_data=trace_full,
+            show_full_content=True,
+        )
+        
+        detailed_report_path.write_text(detailed_report, encoding="utf-8")
+        print(f"📋 详细追踪报告: {detailed_report_path}")
+    
     return str(report_path)
 
 

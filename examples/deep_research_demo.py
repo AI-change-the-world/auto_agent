@@ -1045,6 +1045,7 @@ def _generate_trace_html(trace_summary: dict) -> str:
     
     llm_usage = trace_summary.get("llm_usage", {})
     flow_events = trace_summary.get("flow_events", {})
+    binding_ops = trace_summary.get("binding_ops", {})
     
     # LLM 使用统计
     llm_html = ""
@@ -1053,11 +1054,16 @@ def _generate_trace_html(trace_summary: dict) -> str:
         purpose_rows = ""
         purpose_names = {
             "planning": "任务规划",
+            "binding_plan": "绑定规划",
             "param_build": "参数构造",
             "validation": "期望验证",
             "error_analysis": "错误分析",
             "param_fix": "参数修正",
             "memory_query": "记忆查询",
+            "incremental_replan": "增量重规划",
+            "consistency_check": "一致性检查",
+            "checkpoint_register": "检查点注册",
+            "working_memory": "工作记忆",
             "other": "其他",
         }
         for purpose, data in by_purpose.items():
@@ -1087,6 +1093,44 @@ def _generate_trace_html(trace_summary: dict) -> str:
         {"<table style='width:100%; margin-top:15px; border-collapse:collapse;'><tr style='background:#f7fafc;'><th style='padding:10px; text-align:left;'>调用目的</th><th style='padding:10px;'>次数</th><th style='padding:10px;'>Tokens</th></tr>" + purpose_rows + "</table>" if purpose_rows else ""}
         """
     
+    # 参数绑定统计
+    binding_html = ""
+    if binding_ops and binding_ops.get("total_bindings", 0) > 0:
+        total = binding_ops.get("total_bindings", 0)
+        resolved = binding_ops.get("resolved_bindings", 0)
+        success_rate = (resolved / total * 100) if total > 0 else 0
+        
+        binding_html = f"""
+        <h2>🔗 参数绑定统计</h2>
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">{binding_ops.get('plan_creates', 0)}</div>
+                <div class="stat-label">绑定规划</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{binding_ops.get('resolves', 0)}</div>
+                <div class="stat-label">绑定解析</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{binding_ops.get('fallbacks', 0)}</div>
+                <div class="stat-label">LLM Fallback</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{success_rate:.1f}%</div>
+                <div class="stat-label">绑定成功率</div>
+            </div>
+        </div>
+        <table style='width:100%; margin-top:15px; border-collapse:collapse;'>
+            <tr style='background:#f7fafc;'>
+                <th style='padding:10px; text-align:left;'>指标</th>
+                <th style='padding:10px;'>数量</th>
+            </tr>
+            <tr><td style='padding:8px;'>总绑定数</td><td style='padding:8px;'>{total}</td></tr>
+            <tr><td style='padding:8px;'>成功解析</td><td style='padding:8px;'>{resolved}</td></tr>
+            <tr><td style='padding:8px;'>需要 Fallback</td><td style='padding:8px;'>{binding_ops.get('fallback_bindings', 0)}</td></tr>
+        </table>
+        """
+    
     # 流程事件统计
     flow_html = ""
     total_flow = sum(flow_events.values()) if flow_events else 0
@@ -1113,7 +1157,7 @@ def _generate_trace_html(trace_summary: dict) -> str:
         </div>
         """
     
-    return llm_html + flow_html
+    return llm_html + binding_html + flow_html
 
 
 # ==================== 主程序 ====================
@@ -1226,6 +1270,91 @@ async def main():
                     {"event": "planning", "message": data.get("message", "")}
                 )
 
+            elif event_type == "binding_plan":
+                # 参数绑定规划事件
+                success = data.get("success", True)
+                message = data.get("message", "")
+                bindings_count = data.get("bindings_count", 0)
+
+                if success and bindings_count > 0:
+                    print(f"\n🔗 参数绑定规划完成:")
+                    print(f"   📊 绑定数量: {bindings_count}")
+                    
+                    # 显示置信度统计
+                    output = data.get("output", {})
+                    threshold = output.get("confidence_threshold", 0.7)
+                    steps_bindings = output.get("steps", [])
+                    
+                    # 统计高/低置信度绑定
+                    high_conf = 0
+                    low_conf = 0
+                    source_type_stats = {}
+                    
+                    for step_binding in steps_bindings:
+                        bindings = step_binding.get("bindings", {})
+                        for param, binding_info in bindings.items():
+                            confidence = binding_info.get("confidence", 0)
+                            source_type = binding_info.get("source_type", "unknown")
+                            
+                            if confidence >= threshold:
+                                high_conf += 1
+                            else:
+                                low_conf += 1
+                            
+                            source_type_stats[source_type] = source_type_stats.get(source_type, 0) + 1
+                    
+                    print(f"   ✅ 高置信度: {high_conf} 个 (>= {threshold:.0%})")
+                    print(f"   ⚠️  低置信度: {low_conf} 个 (需要 fallback)")
+                    
+                    # 显示来源类型分布
+                    if source_type_stats:
+                        print(f"   📈 来源类型分布:")
+                        source_type_names = {
+                            "user_input": "用户输入",
+                            "step_output": "步骤输出",
+                            "state": "状态字段",
+                            "literal": "字面量",
+                            "generated": "需生成",
+                        }
+                        for st, count in source_type_stats.items():
+                            name = source_type_names.get(st, st)
+                            print(f"      • {name}: {count}")
+                    
+                    print(f"   📝 {data.get('reasoning', '')[:100]}")
+
+                    # 显示详细绑定信息
+                    for step_binding in steps_bindings:
+                        step_id = step_binding.get("step_id", "?")
+                        tool = step_binding.get("tool", "?")
+                        bindings = step_binding.get("bindings", {})
+                        if bindings:
+                            print(f"\n   Step {step_id} [{tool}]:")
+                            for param, binding_info in bindings.items():
+                                source = binding_info.get("source", "?")
+                                source_type = binding_info.get("source_type", "?")
+                                confidence = binding_info.get("confidence", 0)
+                                reasoning = binding_info.get("reasoning", "")
+                                
+                                conf_icon = "🟢" if confidence >= 0.8 else "🟡" if confidence >= 0.5 else "🔴"
+                                print(f"      {conf_icon} {param}:")
+                                print(f"         来源: {source} ({source_type})")
+                                print(f"         置信度: {confidence:.0%}")
+                                if reasoning:
+                                    print(f"         理由: {reasoning[:60]}...")
+                else:
+                    print(f"\n🔗 {message}")
+                    if not success:
+                        error = data.get("error", "")
+                        if error:
+                            print(f"   ⚠️  错误: {error}")
+                        print(f"   ↪️  将 fallback 到 LLM 推理")
+                
+                execution_log.append({
+                    "event": "binding_plan",
+                    "success": success,
+                    "bindings_count": bindings_count,
+                })
+
             elif event_type == "execution_plan":
                 print("\n" + "-" * 50)
                 print("📋 LLM 规划的执行步骤:")
@@ -1237,6 +1366,9 @@ async def main():
                         f"   {pinned} Step {step['step']}: [{step['name']}] {step['description']}"
                     )
                     steps_info.append(step)
+                has_binding = data.get("has_binding_plan", False)
+                if has_binding:
+                    print(f"   ✅ 已启用参数绑定")
                 print("-" * 50)
                 execution_log.append({"event": "execution_plan", "steps": steps_info})
 
@@ -1406,17 +1538,43 @@ async def main():
                     if collected_trace:
                         trace_summary = collected_trace.get("summary", {})
                         llm_calls = trace_summary.get("llm_calls", {})
+                        binding_ops = trace_summary.get("binding_ops", {})
+                        
                         print(f"   🔍 追踪ID: {collected_trace.get('trace_id', 'N/A')}")
                         print(f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}")
+                        
+                        # 显示绑定统计
+                        if binding_ops and binding_ops.get("total_bindings", 0) > 0:
+                            print(f"\n   🔗 参数绑定统计:")
+                            print(f"      • 绑定规划: {binding_ops.get('plan_creates', 0)} 次")
+                            print(f"      • 绑定解析: {binding_ops.get('resolves', 0)} 次")
+                            print(f"      • LLM Fallback: {binding_ops.get('fallbacks', 0)} 次")
+                            print(f"      • 总绑定数: {binding_ops.get('total_bindings', 0)}")
+                            print(f"      • 成功解析: {binding_ops.get('resolved_bindings', 0)}")
+                            print(f"      • 需要 Fallback: {binding_ops.get('fallback_bindings', 0)}")
+                            
+                            # 计算绑定成功率
+                            total = binding_ops.get("total_bindings", 0)
+                            resolved = binding_ops.get("resolved_bindings", 0)
+                            if total > 0:
+                                success_rate = resolved / total * 100
+                                print(f"      • 绑定成功率: {success_rate:.1f}%")
+                        
                         # 显示按目的分类的统计
                         by_purpose = llm_calls.get("by_purpose", {})
                         if by_purpose:
-                            print("   📊 按目的分类:")
+                            print(f"\n   📊 LLM 调用分类:")
                             purpose_names = {
+                                "planning": "任务规划",
+                                "binding_plan": "绑定规划",
                                 "param_build": "参数构造",
                                 "param_fix": "参数修正",
                                 "prompt_gen": "Prompt生成",
                                 "replan": "重规划",
+                                "incremental_replan": "增量重规划",
+                                "consistency_check": "一致性检查",
+                                "checkpoint_register": "检查点注册",
+                                "working_memory": "工作记忆",
                                 "other": "其他",
                             }
                             for purpose, stats in by_purpose.items():

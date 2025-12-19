@@ -73,6 +73,9 @@ class FullstackGeneratorRunner:
         self.collected_state: Dict[str, Any] = {}
         self.collected_trace: Optional[Dict[str, Any]] = None
         self.collected_trace_full: Optional[Dict[str, Any]] = None  # 完整版追踪数据
+        self.collected_checkpoints: Optional[List[Dict[str, Any]]] = None  # 检查点数据
+        self.collected_working_memory: Optional[Dict[str, Any]] = None  # 工作记忆数据
+        self.collected_violations: Optional[List[Dict[str, Any]]] = None  # 一致性违规数据
         
         # 生成的代码
         self.generated_code: Dict[str, str] = {}
@@ -199,6 +202,85 @@ class FullstackGeneratorRunner:
                     if verbose:
                         print(f"\n📝 {data.get('message', '规划中...')}")
 
+                elif event_type == "binding_plan":
+                    if verbose:
+                        success = data.get("success", True)
+                        message = data.get("message", "")
+                        bindings_count = data.get("bindings_count", 0)
+
+                        if success and bindings_count > 0:
+                            print(f"\n🔗 参数绑定规划完成:")
+                            print(f"   📊 绑定数量: {bindings_count}")
+                            
+                            # 显示置信度统计
+                            output = data.get("output", {})
+                            threshold = output.get("confidence_threshold", 0.7)
+                            steps_bindings = output.get("steps", [])
+                            
+                            # 统计高/低置信度绑定
+                            high_conf = 0
+                            low_conf = 0
+                            source_type_stats = {}
+                            
+                            for step_binding in steps_bindings:
+                                bindings = step_binding.get("bindings", {})
+                                for param, binding_info in bindings.items():
+                                    confidence = binding_info.get("confidence", 0)
+                                    source_type = binding_info.get("source_type", "unknown")
+                                    
+                                    if confidence >= threshold:
+                                        high_conf += 1
+                                    else:
+                                        low_conf += 1
+                                    
+                                    source_type_stats[source_type] = source_type_stats.get(source_type, 0) + 1
+                            
+                            print(f"   ✅ 高置信度: {high_conf} 个 (>= {threshold:.0%})")
+                            print(f"   ⚠️  低置信度: {low_conf} 个 (需要 fallback)")
+                            
+                            # 显示来源类型分布
+                            if source_type_stats:
+                                print(f"   📈 来源类型分布:")
+                                source_type_names = {
+                                    "user_input": "用户输入",
+                                    "step_output": "步骤输出",
+                                    "state": "状态字段",
+                                    "literal": "字面量",
+                                    "generated": "需生成",
+                                }
+                                for st, count in source_type_stats.items():
+                                    name = source_type_names.get(st, st)
+                                    print(f"      • {name}: {count}")
+                            
+                            print(f"   📝 {data.get('reasoning', '')[:100]}")
+
+                            # 显示详细绑定信息
+                            for step_binding in steps_bindings:
+                                step_id = step_binding.get("step_id", "?")
+                                tool = step_binding.get("tool", "?")
+                                bindings = step_binding.get("bindings", {})
+                                if bindings:
+                                    print(f"\n   Step {step_id} [{tool}]:")
+                                    for param, binding_info in bindings.items():
+                                        source = binding_info.get("source", "?")
+                                        source_type = binding_info.get("source_type", "?")
+                                        confidence = binding_info.get("confidence", 0)
+                                        reasoning = binding_info.get("reasoning", "")
+                                        
+                                        conf_icon = "🟢" if confidence >= 0.8 else "🟡" if confidence >= 0.5 else "🔴"
+                                        print(f"      {conf_icon} {param}:")
+                                        print(f"         来源: {source} ({source_type})")
+                                        print(f"         置信度: {confidence:.0%}")
+                                        if reasoning:
+                                            print(f"         理由: {reasoning[:60]}...")
+                        else:
+                            print(f"\n🔗 {message}")
+                            if not success:
+                                error = data.get("error", "")
+                                if error:
+                                    print(f"   ⚠️  错误: {error}")
+                                print(f"   ↪️  将 fallback 到 LLM 推理")
+
                 elif event_type == "execution_plan":
                     if verbose:
                         print("\n" + "-" * 50)
@@ -206,6 +288,9 @@ class FullstackGeneratorRunner:
                         print("-" * 50)
                         for step in data.get("steps", []):
                             print(f"   Step {step['step']}: [{step['name']}] {step['description'][:50]}...")
+                        has_binding = data.get("has_binding_plan", False)
+                        if has_binding:
+                            print(f"   ✅ 已启用参数绑定")
                         print("-" * 50)
 
                     # 保存计划
@@ -307,6 +392,9 @@ class FullstackGeneratorRunner:
                     execution_success = data.get("success", False)
                     self.collected_trace = data.get("trace")
                     self.collected_trace_full = data.get("trace_full")  # 完整版追踪数据
+                    self.collected_checkpoints = data.get("checkpoints")  # 检查点数据
+                    self.collected_working_memory = data.get("working_memory")  # 工作记忆数据
+                    self.collected_violations = data.get("consistency_violations")  # 一致性违规数据
                     
                     if verbose:
                         print("\n" + "=" * 70)
@@ -316,18 +404,43 @@ class FullstackGeneratorRunner:
                             if self.collected_trace:
                                 trace_summary = self.collected_trace.get("summary", {})
                                 llm_calls = trace_summary.get("llm_calls", {})
+                                binding_ops = trace_summary.get("binding_ops", {})
+                                
                                 print(f"   🔍 追踪ID: {self.collected_trace.get('trace_id', 'N/A')}")
                                 print(f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}")
+                                
+                                # 显示绑定统计
+                                if binding_ops and binding_ops.get("total_bindings", 0) > 0:
+                                    print(f"\n   🔗 参数绑定统计:")
+                                    print(f"      • 绑定规划: {binding_ops.get('plan_creates', 0)} 次")
+                                    print(f"      • 绑定解析: {binding_ops.get('resolves', 0)} 次")
+                                    print(f"      • LLM Fallback: {binding_ops.get('fallbacks', 0)} 次")
+                                    print(f"      • 总绑定数: {binding_ops.get('total_bindings', 0)}")
+                                    print(f"      • 成功解析: {binding_ops.get('resolved_bindings', 0)}")
+                                    print(f"      • 需要 Fallback: {binding_ops.get('fallback_bindings', 0)}")
+                                    
+                                    # 计算绑定成功率
+                                    total = binding_ops.get("total_bindings", 0)
+                                    resolved = binding_ops.get("resolved_bindings", 0)
+                                    if total > 0:
+                                        success_rate = resolved / total * 100
+                                        print(f"      • 绑定成功率: {success_rate:.1f}%")
+                                
                                 # 显示按目的分类的统计
                                 by_purpose = llm_calls.get("by_purpose", {})
                                 if by_purpose:
-                                    print("   📊 按目的分类:")
+                                    print(f"\n   📊 LLM 调用分类:")
                                     purpose_names = {
                                         "planning": "任务规划",
+                                        "binding_plan": "绑定规划",
                                         "param_build": "参数构造",
                                         "param_fix": "参数修正",
                                         "prompt_gen": "Prompt生成",
                                         "replan": "重规划",
+                                        "incremental_replan": "增量重规划",
+                                        "consistency_check": "一致性检查",
+                                        "checkpoint_register": "检查点注册",
+                                        "working_memory": "工作记忆",
                                         "other": "其他",
                                     }
                                     for purpose, stats in by_purpose.items():
@@ -359,6 +472,12 @@ class FullstackGeneratorRunner:
             "generated_files": list(self.generated_code.keys()),
             "output_dir": str(self.output_dir / project_name),
             "trace": self.collected_trace,
+            "trace_full": self.collected_trace_full,
+            "checkpoints": self.collected_checkpoints,
+            "working_memory": self.collected_working_memory,
+            "consistency_violations": self.collected_violations,
+            "plan": self.collected_plan,
+            "results": self.collected_results,
         }
 
     def _print_step_result(self, tool_name: str, result: Dict[str, Any]) -> None:

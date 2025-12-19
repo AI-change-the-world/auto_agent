@@ -1,20 +1,15 @@
 """
-Execution Engine（执行引擎）
+Execution Engine 模块
 
-此文件已重构为模块化结构，实际实现位于 auto_agent/core/executor/ 目录下。
-
-模块结构：
+将原 executor.py 拆分为多个子模块：
 - base.py: ExecutionEngine 核心执行逻辑
 - param_builder.py: 参数构造（绑定解析、LLM 推理、验证）
 - replan.py: 重规划（模式检测、增量重规划）
 - consistency.py: 一致性检查
 - post_policy.py: 后处理策略
 - state.py: 状态管理
-
-此文件保留用于向后兼容，所有导入都从新模块重新导出。
 """
 
-# 从新模块导入并重新导出
 from auto_agent.core.executor.base import (
     ExecutionEngine,
     ExecutionPattern,

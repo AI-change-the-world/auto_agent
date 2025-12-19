@@ -19,6 +19,8 @@ from auto_agent.tracing.models import (
     LLMPurpose,
     MemoryAction,
     MemoryEvent,
+    BindingEvent,
+    BindingAction,
     ToolCallEvent,
     TraceContext,
     TraceEvent,
@@ -288,6 +290,57 @@ def trace_memory_event(
         query=query,
         result_count=result_count,
         content_preview=content_preview,
+        duration_ms=duration_ms,
+        metadata=metadata,
+    )
+    trace.add_event(event)
+
+
+def trace_binding_event(
+    action: Union[BindingAction, str],
+    step_id: str = "",
+    tool_name: str = "",
+    bindings_count: int = 0,
+    resolved_count: int = 0,
+    fallback_count: int = 0,
+    confidence_threshold: float = 0.7,
+    binding_details: list = None,
+    duration_ms: float = 0,
+    **metadata,
+):
+    """
+    记录参数绑定事件
+    
+    Args:
+        action: 绑定动作类型 (plan_create, resolve, fallback)
+        step_id: 步骤 ID
+        tool_name: 工具名称
+        bindings_count: 绑定总数
+        resolved_count: 成功解析数
+        fallback_count: 需要 fallback 数
+        confidence_threshold: 置信度阈值
+        binding_details: 绑定详情列表
+        duration_ms: 耗时（毫秒）
+    """
+    trace = get_current_trace()
+    if not trace:
+        return
+    
+    if isinstance(action, str):
+        try:
+            action = BindingAction(action)
+        except ValueError:
+            action = BindingAction.RESOLVE
+    
+    event = BindingEvent(
+        action=action,
+        step_id=step_id,
+        tool_name=tool_name,
+        bindings_count=bindings_count,
+        resolved_count=resolved_count,
+        fallback_count=fallback_count,
+        confidence_threshold=confidence_threshold,
+        binding_details=binding_details or [],
         duration_ms=duration_ms,
         metadata=metadata,
     )

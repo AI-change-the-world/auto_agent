@@ -441,9 +441,208 @@ class ToolDefinition:
 
 ---
 
+## 阶段七：参数绑定规划器 Binding Planner ✅ 已完成
+
+> 目标：减少运行时参数构造的 LLM 调用，将参数依赖分析提前到规划阶段
+
+### 背景问题
+
+当前框架在执行每个步骤时，都需要调用 LLM 来构造工具参数，导致：
+- Token 消耗大（每步都要发送完整上下文）
+- 延迟高（每步都要等待 LLM 响应）
+- 重复推理（相同的参数依赖关系被多次分析）
+
+### 解决方案
+
+引入 Binding Planner，在规划阶段一次性分析所有步骤的参数依赖链路：
+
+```
+原有流程:
+Plan → Execute Step1 → [LLM构造参数] → Execute Step2 → [LLM构造参数] → ...
+                          ↑ 每步都要调用 LLM
+
+新流程:
+Plan → [Binding Planner] → Execute Step1 → Execute Step2 → ...
+              ↑ 只调用一次 LLM，后续直接按绑定取值
+```
+
+### 实现清单
+
+- [x] **7.1 定义数据结构** ✅
+  - `BindingSourceType`: 参数来源类型枚举
+  - `BindingFallbackPolicy`: 回退策略枚举
+  - `ParameterBinding`: 单个参数的绑定配置
+  - `StepBindings`: 单个步骤的所有参数绑定
+  - `BindingPlan`: 完整的参数绑定计划
+  - 📍 实现位置: `auto_agent/models.py`
+
+- [x] **7.2 实现 BindingPlanner** ✅
+  - `create_binding_plan()`: 为执行计划创建参数绑定
+  - `_collect_steps_info()`: 收集步骤的工具参数信息
+  - `_build_binding_prompt()`: 构建 LLM prompt
+  - `_parse_binding_result()`: 解析 LLM 返回的绑定结果
+  - 📍 实现位置: `auto_agent/core/binding_planner.py`
+
+- [x] **7.3 修改 ExecutionEngine 支持 BindingPlan** ✅
+  - `execute_plan_stream()` 新增 `binding_plan` 参数
+  - `_build_tool_arguments()` 优先使用绑定解析参数
+  - `_resolve_bindings()`: 解析步骤的参数绑定
+  - `_resolve_single_binding()`: 解析单个参数绑定
+  - `_resolve_step_output_binding()`: 解析步骤输出绑定
+  - 保存步骤输出到 `_step_outputs` 供后续绑定使用
+  - 📍 实现位置: `auto_agent/core/executor.py`
+
+- [x] **7.4 修改 AutoAgent 集成 BindingPlanner** ✅
+  - 初始化 `BindingPlanner` 实例
+  - `run()` 和 `run_stream()` 在规划后调用 BindingPlanner
+  - 新增 `enable_binding` 参数控制是否启用
+  - 发送 `binding_plan` 事件通知绑定规划结果
+  - 📍 实现位置: `auto_agent/core/agent.py`
+
+- [x] **7.5 更新导出** ✅
+  - 在 `auto_agent/__init__.py` 中导出新增的类
+  - 📍 实现位置: `auto_agent/__init__.py`
+
+- [x] **7.6 添加测试** ✅
+  - 数据结构序列化/反序列化测试
+  - BindingPlanner 功能测试
+  - 📍 实现位置: `tests/test_binding_planner.py`
+
+- [x] **7.7 添加文档** ✅
+  - 📍 实现位置: `docs/BINDING_PLANNER.md`
+
+### 预期收益
+
+| 指标 | 原有方式 | 使用 Binding Planner |
+|------|---------|---------------------|
+| LLM 调用次数（5步任务） | 5 次 | 1 次 |
+| 参数构造 Token 消耗 | ~2500 tokens | ~800 tokens |
+| Token 节省 | - | ~68% |
+
+---
+
+---
+
+## 阶段八：执行引擎模块化重构 ✅ 已完成
+
+> 目标：将 executor.py（3200+ 行）拆分为多个职责单一的模块
+
+### 背景问题
+
+`executor.py` 文件过长（3200+ 行），包含了多个不同职责的代码：
+- 核心执行逻辑
+- 参数构造和绑定解析
+- 重规划逻辑
+- 一致性检查
+- 后处理策略
+- 状态管理
+
+### 解决方案
+
+将 `executor.py` 拆分为 `auto_agent/core/executor/` 目录下的多个模块：
+
+```
+auto_agent/core/executor/
+├── __init__.py          # 导出
+├── base.py              # ExecutionEngine 核心执行逻辑
+├── param_builder.py     # 参数构造（绑定解析、LLM 推理、验证）
+├── replan.py            # 重规划（模式检测、增量重规划）
+├── consistency.py       # 一致性检查
+├── post_policy.py       # 后处理策略
+└── state.py             # 状态管理工具
+```
+
+### 实现清单
+
+- [x] **8.1 创建 state.py** ✅
+  - `get_nested_value()`: 从嵌套字典获取值
+  - `compress_state_for_llm()`: 压缩状态供 LLM 使用
+  - `update_state_from_result()`: 更新状态
+  - 📍 实现位置: `auto_agent/core/executor/state.py`
+
+- [x] **8.2 创建 param_builder.py** ✅
+  - `ParameterBuilder` 类
+  - `resolve_bindings_with_trace()`: 解析参数绑定
+  - `build_arguments_with_llm()`: LLM 参数推理
+  - `validate_parameters()`: 参数验证
+  - `validate_and_fix_parameters()`: 验证并修正参数
+  - 📍 实现位置: `auto_agent/core/executor/param_builder.py`
+
+- [x] **8.3 创建 replan.py** ✅
+  - `PatternType` 枚举
+  - `ExecutionPattern` 数据类
+  - `ReplanManager` 类
+  - `detect_execution_patterns()`: 检测执行模式
+  - `should_trigger_replan()`: 判断是否需要重规划
+  - `evaluate_and_replan()`: 评估并重规划
+  - `_incremental_replan()`: 增量重规划
+  - `_generate_alternative_plan()`: 全量重规划
+  - 📍 实现位置: `auto_agent/core/executor/replan.py`
+
+- [x] **8.4 创建 consistency.py** ✅
+  - `ConsistencyManager` 类
+  - `register_consistency_checkpoint()`: 注册检查点
+  - `check_consistency()`: 检查一致性
+  - 📍 实现位置: `auto_agent/core/executor/consistency.py`
+
+- [x] **8.5 创建 post_policy.py** ✅
+  - `PostPolicyManager` 类
+  - `apply_post_policy()`: 应用后处理策略
+  - `extract_working_memory()`: 提取工作记忆
+  - `get_validation_action()`: 获取验证失败动作
+  - 📍 实现位置: `auto_agent/core/executor/post_policy.py`
+
+- [x] **8.6 创建 base.py** ✅
+  - `ExecutionEngine` 核心类
+  - `execute_plan()`: 同步执行
+  - `execute_plan_stream()`: 流式执行
+  - `_execute_subtask()`: 执行子任务
+  - `_build_tool_arguments()`: 构造参数
+  - 兼容性方法委托给子模块
+  - 📍 实现位置: `auto_agent/core/executor/base.py`
+
+- [x] **8.7 更新 __init__.py** ✅
+  - 导出所有公共类和函数
+  - 📍 实现位置: `auto_agent/core/executor/__init__.py`
+
+- [x] **8.8 更新原 executor.py** ✅
+  - 改为从新模块导入并重新导出
+  - 保持向后兼容
+  - 📍 实现位置: `auto_agent/core/executor.py`
+
+### 模块职责
+
+| 模块 | 职责 | 行数 |
+|------|------|------|
+| base.py | 核心执行逻辑、子任务执行、参数构造入口 | ~500 |
+| param_builder.py | 绑定解析、LLM 推理、参数验证 | ~350 |
+| replan.py | 模式检测、增量/全量重规划 | ~400 |
+| consistency.py | 检查点注册、一致性检查 | ~200 |
+| post_policy.py | 后处理策略、工作记忆提取 | ~250 |
+| state.py | 状态读取、更新、压缩 | ~100 |
+
+### 预期收益
+
+- 代码可读性提升：每个模块职责单一，易于理解
+- 可维护性提升：修改某个功能只需关注对应模块
+- 可测试性提升：可以单独测试每个模块
+- 向后兼容：原有导入方式继续有效
+
+---
+
 ## 相关文件
 
 - `auto_agent/core/planner.py` - 任务规划器
-- `auto_agent/core/executor.py` - 执行引擎
+- `auto_agent/core/binding_planner.py` - 参数绑定规划器
+- `auto_agent/core/executor.py` - 执行引擎（重新导出）
+- `auto_agent/core/executor/` - 执行引擎模块目录
+  - `base.py` - 核心执行逻辑
+  - `param_builder.py` - 参数构造
+  - `replan.py` - 重规划
+  - `consistency.py` - 一致性检查
+  - `post_policy.py` - 后处理策略
+  - `state.py` - 状态管理
 - `auto_agent/core/context.py` - 执行上下文
+- `auto_agent/core/agent.py` - AutoAgent 主类
 - `auto_agent/models.py` - 数据模型
+- `docs/BINDING_PLANNER.md` - Binding Planner 文档

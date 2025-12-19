@@ -24,6 +24,7 @@ class EventType(Enum):
 class LLMPurpose(Enum):
     """LLM 调用目的"""
     PLANNING = "planning"  # 任务规划
+    BINDING_PLAN = "binding_plan"  # 参数绑定规划
     PARAM_BUILD = "param_build"  # 参数构造
     VALIDATION = "validation"  # 期望验证
     ERROR_ANALYSIS = "error_analysis"  # 错误分析
@@ -32,6 +33,10 @@ class LLMPurpose(Enum):
     MEMORY_SUMMARY = "memory_summary"  # 记忆总结
     PROMPT_GEN = "prompt_gen"  # Prompt 生成
     REPLAN = "replan"  # 重规划
+    INCREMENTAL_REPLAN = "incremental_replan"  # 增量重规划
+    CONSISTENCY_CHECK = "consistency_check"  # 一致性检查
+    CHECKPOINT_REGISTER = "checkpoint_register"  # 检查点注册
+    WORKING_MEMORY = "working_memory"  # 工作记忆提取
     OTHER = "other"
 
 
@@ -184,6 +189,42 @@ class FlowEvent(TraceEvent):
             "attempt": self.attempt,
             "max_attempts": self.max_attempts,
             "context": self.context,
+        })
+        return base
+
+
+class BindingAction(Enum):
+    """参数绑定动作类型"""
+    PLAN_CREATE = "plan_create"  # 创建绑定计划
+    RESOLVE = "resolve"  # 解析绑定
+    FALLBACK = "fallback"  # 回退到 LLM
+
+
+@dataclass
+class BindingEvent(TraceEvent):
+    """参数绑定事件"""
+    event_type: EventType = field(default=EventType.CUSTOM)
+    action: BindingAction = BindingAction.RESOLVE
+    step_id: str = ""
+    tool_name: str = ""
+    bindings_count: int = 0
+    resolved_count: int = 0
+    fallback_count: int = 0
+    confidence_threshold: float = 0.7
+    binding_details: List[Dict[str, Any]] = field(default_factory=list)
+    
+    def to_dict(self, truncate: bool = True) -> Dict[str, Any]:
+        """转换为字典"""
+        base = super().to_dict()
+        base.update({
+            "action": self.action.value,
+            "step_id": self.step_id,
+            "tool_name": self.tool_name,
+            "bindings_count": self.bindings_count,
+            "resolved_count": self.resolved_count,
+            "fallback_count": self.fallback_count,
+            "confidence_threshold": self.confidence_threshold,
+            "binding_details": self.binding_details if not truncate else self.binding_details[:5],
         })
         return base
 
@@ -390,6 +431,27 @@ class TraceContext:
         tool_events = [e for e in all_events if isinstance(e, ToolCallEvent)]
         flow_events = [e for e in all_events if isinstance(e, FlowEvent)]
         memory_events = [e for e in all_events if isinstance(e, MemoryEvent)]
+        binding_events = [e for e in all_events if isinstance(e, BindingEvent)]
+        
+        # 统计绑定事件
+        binding_stats = {
+            "plan_creates": 0,
+            "resolves": 0,
+            "fallbacks": 0,
+            "total_bindings": 0,
+            "resolved_bindings": 0,
+            "fallback_bindings": 0,
+        }
+        for e in binding_events:
+            if e.action == BindingAction.PLAN_CREATE:
+                binding_stats["plan_creates"] += 1
+            elif e.action == BindingAction.RESOLVE:
+                binding_stats["resolves"] += 1
+            elif e.action == BindingAction.FALLBACK:
+                binding_stats["fallbacks"] += 1
+            binding_stats["total_bindings"] += e.bindings_count
+            binding_stats["resolved_bindings"] += e.resolved_count
+            binding_stats["fallback_bindings"] += e.fallback_count
         
         return {
             "trace_id": self.trace_id,
@@ -417,6 +479,7 @@ class TraceContext:
                 "writes": sum(1 for e in memory_events if e.action == MemoryAction.WRITE),
                 "searches": sum(1 for e in memory_events if e.action == MemoryAction.SEARCH),
             },
+            "binding_ops": binding_stats,
         }
     
     def _collect_all_events(self, span: TraceSpan) -> List[TraceEvent]:

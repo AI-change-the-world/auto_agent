@@ -13,6 +13,7 @@ Auto-Agent 智能体框架
 """
 
 from auto_agent.core.agent import AutoAgent
+from auto_agent.core.binding_planner import BindingPlanner
 from auto_agent.core.context import ExecutionContext, StepRecord
 from auto_agent.core.editor.parser import AgentDefinition, AgentMarkdownParser
 from auto_agent.core.executor import ExecutionEngine
@@ -39,13 +40,18 @@ from auto_agent.memory.system import MemorySystem
 from auto_agent.memory.working import WorkingMemory
 from auto_agent.models import (
     AgentResponse,
+    BindingFallbackPolicy,
+    BindingPlan,
+    BindingSourceType,
     ExecutionPlan,
     ExecutionStrategy,
     FailAction,
     Message,
+    ParameterBinding,
     PlanStep,
     PostSuccessConfig,
     ResultHandlingConfig,
+    StepBindings,
     StepResultData,
     SubTaskResult,
     TaskComplexity,
@@ -84,6 +90,7 @@ __version__ = "0.1.0"
 __all__ = [
     # 核心
     "AutoAgent",
+    "BindingPlanner",
     "ExecutionContext",
     "StepRecord",
     "ExecutionEngine",
@@ -138,6 +145,13 @@ __all__ = [
     "ValidationConfig",
     "PostSuccessConfig",
     "ResultHandlingConfig",
+    # 参数绑定
+    "BindingPlan",
+    "BindingPlanner",
+    "BindingSourceType",
+    "BindingFallbackPolicy",
+    "ParameterBinding",
+    "StepBindings",
     # 重试
     "RetryConfig",
     "RetryStrategy",

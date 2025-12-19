@@ -20,10 +20,11 @@ AutoAgent 主类
 
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
+from auto_agent.core.binding_planner import BindingPlanner
 from auto_agent.core.executor import ExecutionEngine
 from auto_agent.core.planner import TaskPlanner
 from auto_agent.llm.client import LLMClient
-from auto_agent.models import AgentResponse
+from auto_agent.models import AgentResponse, BindingPlan
 from auto_agent.retry.models import RetryConfig
 from auto_agent.tools.registry import ToolRegistry
 
@@ -66,6 +67,12 @@ class AutoAgent:
             agent_constraints=agent_constraints,
         )
 
+        # 初始化参数绑定规划器
+        self.binding_planner = BindingPlanner(
+            llm_client=llm_client,
+            tool_registry=tool_registry,
+        )
+
         # 初始化执行引擎（Memory 系统由 ExecutionEngine 内部管理）
         self.executor = ExecutionEngine(
             tool_registry=tool_registry,
@@ -73,6 +80,9 @@ class AutoAgent:
             llm_client=llm_client,
             memory_storage_path=memory_storage_path,
         )
+
+        # 是否启用参数绑定（默认启用）
+        self._enable_binding = True
 
     async def run(
         self,
@@ -82,6 +92,7 @@ class AutoAgent:
         template_id: Optional[int] = None,
         initial_plan: Optional[List[Dict[str, Any]]] = None,
         tool_executor: Optional[Callable] = None,
+        enable_binding: Optional[bool] = None,
     ) -> AgentResponse:
         """
         执行智能体任务（非流式）
@@ -93,10 +104,14 @@ class AutoAgent:
             template_id: 模板ID（可选）
             initial_plan: 初始计划（含固定步骤）
             tool_executor: 自定义工具执行器
+            enable_binding: 是否启用参数绑定（默认使用实例配置）
 
         Returns:
             AgentResponse
         """
+        # 确定是否启用参数绑定
+        use_binding = enable_binding if enable_binding is not None else self._enable_binding
+
         # Step 1: 规划
         plan = await self.planner.plan(
             query=query,
@@ -113,6 +128,18 @@ class AutoAgent:
                 execution_results=[],
                 iterations=0,
             )
+
+        # Step 1.5: 参数绑定规划（新增）
+        binding_plan: Optional[BindingPlan] = None
+        if use_binding and len(plan.subtasks) > 1:
+            try:
+                binding_plan = await self.binding_planner.create_binding_plan(
+                    execution_plan=plan,
+                    user_input=query,
+                )
+            except Exception:
+                # 绑定规划失败不影响执行
+                pass
 
         # Step 2: 初始化状态
         state = self._initialize_state(query, template_id, plan.state_schema)
@@ -135,6 +162,7 @@ class AutoAgent:
             conversation_id=conversation_id or "",
             tool_executor=tool_executor,
             agent_info=agent_info,
+            binding_plan=binding_plan,
         ):
             if event["event"] == "execution_complete":
                 final_state = event["data"]["state"]
@@ -159,17 +187,30 @@ class AutoAgent:
         template_id: Optional[int] = None,
         initial_plan: Optional[List[Dict[str, Any]]] = None,
         tool_executor: Optional[Callable] = None,
+        enable_binding: Optional[bool] = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         流式执行智能体任务
 
         直接复用 ExecutionEngine.execute_plan_stream()
 
+        Args:
+            query: 用户查询
+            user_id: 用户ID
+            conversation_id: 对话ID（可选）
+            template_id: 模板ID（可选）
+            initial_plan: 初始计划（含固定步骤）
+            tool_executor: 自定义工具执行器
+            enable_binding: 是否启用参数绑定（默认使用实例配置）
+
         Yields:
             事件字典，包含：
             - event: 事件类型 (planning/stage_start/stage_complete/answer/done)
             - data: 事件数据
         """
+        # 确定是否启用参数绑定
+        use_binding = enable_binding if enable_binding is not None else self._enable_binding
+
         # Step 1: 规划阶段
         yield {"event": "planning", "data": {"message": "正在规划执行步骤..."}}
 
@@ -186,6 +227,94 @@ class AutoAgent:
                 "data": {"message": "规划失败", "errors": plan.errors},
             }
             return
+
+        # Step 1.5: 参数绑定规划（新增）
+        binding_plan: Optional[BindingPlan] = None
+        if use_binding and len(plan.subtasks) > 1:
+            yield {"event": "planning", "data": {"message": "正在分析参数绑定..."}}
+            try:
+                # 收集输入信息用于 tracing
+                binding_input = {
+                    "steps_count": len(plan.subtasks),
+                    "steps": [
+                        {
+                            "step_id": s.id,
+                            "tool": s.tool,
+                            "description": s.description[:100] if s.description else "",
+                        }
+                        for s in plan.subtasks
+                    ],
+                    "query_preview": query[:200] if len(query) > 200 else query,
+                }
+
+                binding_plan = await self.binding_planner.create_binding_plan(
+                    execution_plan=plan,
+                    user_input=query,
+                )
+
+                if binding_plan and binding_plan.steps:
+                    # 收集详细的绑定输出信息
+                    bindings_summary = []
+                    for step in binding_plan.steps:
+                        step_summary = {
+                            "step_id": step.step_id,
+                            "tool": step.tool,
+                            "bindings": {},
+                        }
+                        for param_name, binding in step.bindings.items():
+                            step_summary["bindings"][param_name] = {
+                                "source": binding.source,
+                                "source_type": binding.source_type.value,
+                                "confidence": binding.confidence,
+                                "reasoning": binding.reasoning,  # 添加推理说明
+                                "default_value": binding.default_value,  # 添加默认值
+                                "fallback_policy": binding.fallback_policy.value if binding.fallback_policy else "llm_infer",
+                            }
+                        bindings_summary.append(step_summary)
+
+                    yield {
+                        "event": "binding_plan",
+                        "data": {
+                            "success": True,
+                            "message": f"参数绑定规划完成，共 {len(binding_plan.steps)} 个步骤",
+                            "bindings_count": sum(
+                                len(s.bindings) for s in binding_plan.steps
+                            ),
+                            "reasoning": binding_plan.reasoning,
+                            "confidence_threshold": binding_plan.confidence_threshold,
+                            "input": binding_input,
+                            "output": {
+                                "steps": bindings_summary,
+                                "confidence_threshold": binding_plan.confidence_threshold,
+                            },
+                        },
+                    }
+                else:
+                    yield {
+                        "event": "binding_plan",
+                        "data": {
+                            "success": True,
+                            "message": "参数绑定规划完成，但无绑定配置",
+                            "bindings_count": 0,
+                            "reasoning": binding_plan.reasoning if binding_plan else "",
+                            "input": binding_input,
+                        },
+                    }
+            except Exception as e:
+                # 绑定规划失败不影响执行，fallback 到原有逻辑
+                import traceback
+                yield {
+                    "event": "binding_plan",
+                    "data": {
+                        "success": False,
+                        "message": f"参数绑定规划失败，将 fallback 到 LLM 推理: {str(e)}",
+                        "bindings_count": 0,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "traceback": traceback.format_exc(),
+                        "fallback": "llm_infer",
+                    },
+                }
 
         yield {
             "event": "execution_plan",
@@ -206,6 +335,7 @@ class AutoAgent:
                 ],
                 "state_schema": plan.state_schema,
                 "warnings": plan.warnings,
+                "has_binding_plan": binding_plan is not None and len(binding_plan.steps) > 0,
             },
         }
 
@@ -224,12 +354,14 @@ class AutoAgent:
         final_state = state
         trace_data = None  # 追踪数据（摘要版）
         trace_data_full = None  # 追踪数据（完整版）
+        execution_context = None  # 执行上下文
         async for event in self.executor.execute_plan_stream(
             plan=plan,
             state=state,
             conversation_id=conversation_id or "",
             tool_executor=tool_executor,
             agent_info=agent_info,
+            binding_plan=binding_plan,
         ):
             # 转发执行事件
             if event["event"] != "execution_complete":
@@ -238,6 +370,7 @@ class AutoAgent:
                 final_state = event["data"]["state"]
                 trace_data = event["data"].get("trace")  # 提取追踪数据（摘要版）
                 trace_data_full = event["data"].get("trace_full")  # 提取追踪数据（完整版）
+                execution_context = event["data"].get("context")  # 提取执行上下文
 
         # Step 4: 生成答案
         final_response = self._aggregate_results(final_state)
@@ -253,6 +386,80 @@ class AutoAgent:
         }
 
         # Step 5: 完成
+        # 提取检查点和工作记忆数据
+        checkpoints_data = None
+        working_memory_data = None
+        violations_data = None
+        
+        if execution_context:
+            # 提取一致性检查点
+            if hasattr(execution_context, 'consistency_checker'):
+                checker = execution_context.consistency_checker
+                checkpoints_data = []
+                for step_id, cp in checker.checkpoints.items():
+                    checkpoints_data.append({
+                        "checkpoint_id": step_id,
+                        "step_id": cp.step_id,
+                        "checkpoint_type": cp.artifact_type,
+                        "description": cp.description,
+                        "key_elements": cp.key_elements,
+                        "constraints": cp.constraints_for_future,
+                    })
+                
+                # 提取违规记录
+                if checker.violations:
+                    violations_data = []
+                    for v in checker.violations:
+                        violations_data.append({
+                            "checkpoint_id": v.checkpoint_id,
+                            "current_step_id": v.current_step_id,
+                            "severity": v.severity,
+                            "description": v.description,
+                            "suggestion": v.suggestion,
+                        })
+            
+            # 提取工作记忆
+            if hasattr(execution_context, 'working_memory'):
+                wm = execution_context.working_memory
+                working_memory_data = {
+                    "decisions": [
+                        {
+                            "decision": d.decision,
+                            "rationale": d.reason,  # 使用 reason 而不是 rationale
+                            "step_id": d.step_id,
+                            "tags": d.tags,
+                        }
+                        for d in wm.design_decisions
+                    ],
+                    "constraints": [
+                        {
+                            "constraint": c.constraint,
+                            "source": c.source,
+                            "priority": c.priority,
+                            "scope": c.scope,
+                        }
+                        for c in wm.constraints
+                    ],
+                    "interfaces": [
+                        {
+                            "name": name,
+                            "type": iface.interface_type,
+                            "definition": str(iface.definition)[:200] if iface.definition else "",
+                            "step_id": iface.defined_by,
+                        }
+                        for name, iface in wm.interfaces.items()  # interfaces 是 dict
+                    ],
+                    "todos": [
+                        {
+                            "todo": t.todo,  # 使用 todo 而不是 description
+                            "priority": t.priority,
+                            "status": "done" if t.completed else "pending",  # 使用 completed
+                            "created_by": t.created_by,
+                        }
+                        for t in wm.todos
+                    ],
+                }
+        
         yield {
             "event": "done",
             "data": {
@@ -261,6 +468,9 @@ class AutoAgent:
                 "iterations": final_state.get("control", {}).get("iterations", 0),
                 "trace": trace_data,  # 传递追踪数据（摘要版）
                 "trace_full": trace_data_full,  # 传递追踪数据（完整版）
+                "checkpoints": checkpoints_data,  # 传递检查点数据
+                "working_memory": working_memory_data,  # 传递工作记忆数据
+                "consistency_violations": violations_data,  # 传递一致性违规数据
             },
         }
 

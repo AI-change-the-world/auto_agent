@@ -8,6 +8,162 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+# ==================== 参数绑定 (Binding Planner) ====================
+
+
+class BindingSourceType(Enum):
+    """参数绑定来源类型"""
+
+    USER_INPUT = "user_input"  # 来自用户输入 (state.inputs.xxx)
+    STEP_OUTPUT = "step_output"  # 来自前序步骤输出 (step_1.output.xxx)
+    STATE = "state"  # 来自状态字段 (state.xxx)
+    LITERAL = "literal"  # 字面量值
+    GENERATED = "generated"  # 需要运行时生成（fallback 到 LLM）
+
+
+class BindingFallbackPolicy(Enum):
+    """绑定失败时的回退策略"""
+
+    LLM_INFER = "llm_infer"  # 使用 LLM 推理（当前默认实现）
+    USE_DEFAULT = "use_default"  # 使用默认值
+    ERROR = "error"  # 抛出错误
+    # 以下为未来扩展
+    # ASK_USER = "ask_user"      # 询问用户
+    # GENERATE = "generate"      # 使用专门的生成器
+
+
+@dataclass
+class ParameterBinding:
+    """
+    单个参数的绑定配置
+
+    描述一个工具参数的值应该从哪里获取
+
+    Attributes:
+        source: 数据来源路径
+            - USER_INPUT: "query" -> state["inputs"]["query"]
+            - STEP_OUTPUT: "step_1.output.endpoints" -> 步骤1输出的 endpoints 字段
+            - STATE: "documents" -> state["documents"]
+            - LITERAL: 直接使用 default_value
+            - GENERATED: 运行时由 LLM 生成
+        source_type: 来源类型
+        confidence: 置信度 (0.0-1.0)，低于阈值时触发 fallback
+        fallback: 回退策略
+        default_value: 默认值（LITERAL 类型或 USE_DEFAULT fallback 时使用）
+        transform: 可选的转换表达式（预留，如 "[:5]" 取前5个）
+        reasoning: LLM 的推理说明
+    """
+
+    source: str
+    source_type: BindingSourceType
+    confidence: float = 1.0
+    fallback: BindingFallbackPolicy = BindingFallbackPolicy.LLM_INFER
+    default_value: Any = None
+    transform: Optional[str] = None
+    reasoning: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "source": self.source,
+            "source_type": self.source_type.value,
+            "confidence": self.confidence,
+            "fallback": self.fallback.value,
+            "default_value": self.default_value,
+            "transform": self.transform,
+            "reasoning": self.reasoning,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ParameterBinding":
+        return cls(
+            source=data["source"],
+            source_type=BindingSourceType(data["source_type"]),
+            confidence=data.get("confidence", 1.0),
+            fallback=BindingFallbackPolicy(data.get("fallback", "llm_infer")),
+            default_value=data.get("default_value"),
+            transform=data.get("transform"),
+            reasoning=data.get("reasoning"),
+        )
+
+
+@dataclass
+class StepBindings:
+    """
+    单个步骤的所有参数绑定
+
+    Attributes:
+        step_id: 步骤 ID（对应 PlanStep.id）
+        tool: 工具名称
+        bindings: 参数名 -> 绑定配置的映射
+    """
+
+    step_id: str
+    tool: str
+    bindings: Dict[str, ParameterBinding] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "step_id": self.step_id,
+            "tool": self.tool,
+            "bindings": {k: v.to_dict() for k, v in self.bindings.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "StepBindings":
+        return cls(
+            step_id=data["step_id"],
+            tool=data["tool"],
+            bindings={
+                k: ParameterBinding.from_dict(v)
+                for k, v in data.get("bindings", {}).items()
+            },
+        )
+
+
+@dataclass
+class BindingPlan:
+    """
+    完整的参数绑定计划
+
+    由 BindingPlanner 在规划阶段生成，描述每个步骤的参数应该如何获取
+
+    Attributes:
+        steps: 每个步骤的绑定配置
+        confidence_threshold: 置信度阈值，低于此值触发 fallback
+        reasoning: LLM 的整体推理过程
+        created_at: 创建时间
+    """
+
+    steps: List[StepBindings] = field(default_factory=list)
+    confidence_threshold: float = 0.7
+    reasoning: str = ""
+    created_at: str = ""
+
+    def get_step_bindings(self, step_id: str) -> Optional[StepBindings]:
+        """获取指定步骤的绑定配置"""
+        for step in self.steps:
+            if step.step_id == step_id:
+                return step
+        return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "steps": [s.to_dict() for s in self.steps],
+            "confidence_threshold": self.confidence_threshold,
+            "reasoning": self.reasoning,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BindingPlan":
+        return cls(
+            steps=[StepBindings.from_dict(s) for s in data.get("steps", [])],
+            confidence_threshold=data.get("confidence_threshold", 0.7),
+            reasoning=data.get("reasoning", ""),
+            created_at=data.get("created_at", ""),
+        )
+
+
 # ==================== 验证模式枚举 ====================
 
 

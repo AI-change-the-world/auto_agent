@@ -25,8 +25,11 @@ from auto_agent.tracing.models import (
     ToolCallEvent,
     FlowEvent,
     MemoryEvent,
+    BindingEvent,
+    BindingAction,
     TraceSpan,
     TraceContext,
+    LLMPurpose,
 )
 from auto_agent.tracing.context import (
     Tracer,
@@ -36,6 +39,7 @@ from auto_agent.tracing.context import (
     trace_tool_call,
     trace_flow_event,
     trace_memory_event,
+    trace_binding_event,
     start_span
 )
 
@@ -46,8 +50,11 @@ __all__ = [
     "ToolCallEvent",
     "FlowEvent",
     "MemoryEvent",
+    "BindingEvent",
+    "BindingAction",
     "TraceSpan",
     "TraceContext",
+    "LLMPurpose",
     # 追踪工具
     "Tracer",
     "get_current_trace",
@@ -56,5 +63,6 @@ __all__ = [
     "trace_tool_call",
     "trace_flow_event",
     "trace_memory_event",
+    "trace_binding_event",
     "start_span"
 ]

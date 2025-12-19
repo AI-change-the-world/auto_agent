@@ -24,6 +24,9 @@ class ExecutionReportGenerator:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         trace_data: Optional[Dict[str, Any]] = None,
+        checkpoints: Optional[List[Dict[str, Any]]] = None,
+        working_memory: Optional[Dict[str, Any]] = None,
+        consistency_violations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         生成结构化的执行报告数据
@@ -37,6 +40,9 @@ class ExecutionReportGenerator:
             start_time: 开始时间
             end_time: 结束时间
             trace_data: 追踪数据（来自 Tracer）
+            checkpoints: 一致性检查点列表
+            working_memory: 工作记忆数据
+            consistency_violations: 一致性违规列表
 
         Returns:
             结构化的报告数据
@@ -107,6 +113,18 @@ class ExecutionReportGenerator:
         if trace_data:
             report["trace"] = ExecutionReportGenerator._extract_trace_summary(trace_data)
         
+        # 整合检查点数据
+        if checkpoints:
+            report["checkpoints"] = checkpoints
+        
+        # 整合工作记忆数据
+        if working_memory:
+            report["working_memory"] = working_memory
+        
+        # 整合一致性违规数据
+        if consistency_violations:
+            report["consistency_violations"] = consistency_violations
+        
         return report
     
     @staticmethod
@@ -136,6 +154,7 @@ class ExecutionReportGenerator:
                 "replans": summary.get("flow_events", {}).get("replans", 0),
             },
             "memory_ops": summary.get("memory_ops", {}),
+            "binding_ops": summary.get("binding_ops", {}),
         }
 
     @staticmethod
@@ -247,6 +266,7 @@ class ExecutionReportGenerator:
                 ])
                 purpose_names = {
                     "planning": "任务规划",
+                    "binding_plan": "绑定规划",
                     "param_build": "参数构造",
                     "validation": "期望验证",
                     "error_analysis": "错误分析",
@@ -255,12 +275,39 @@ class ExecutionReportGenerator:
                     "memory_summary": "记忆总结",
                     "prompt_gen": "Prompt生成",
                     "replan": "重规划",
+                    "incremental_replan": "增量重规划",
+                    "consistency_check": "一致性检查",
+                    "checkpoint_register": "检查点注册",
+                    "working_memory": "工作记忆",
                     "other": "其他",
                 }
                 for purpose, data in by_purpose.items():
                     name = purpose_names.get(purpose, purpose)
                     lines.append(f"| {name} | {data.get('count', 0)} | {data.get('tokens', 0):,} |")
                 lines.append("")
+        
+        # 添加参数绑定统计（如果有）
+        binding_ops = trace.get("binding_ops", {})
+        if binding_ops and binding_ops.get("total_bindings", 0) > 0:
+            total = binding_ops.get("total_bindings", 0)
+            resolved = binding_ops.get("resolved_bindings", 0)
+            fallback = binding_ops.get("fallback_bindings", 0)
+            success_rate = (resolved / total * 100) if total > 0 else 0
+            
+            lines.extend([
+                "## 参数绑定统计",
+                "",
+                "| 指标 | 值 |",
+                "|------|-----|",
+                f"| 绑定规划次数 | {binding_ops.get('plan_creates', 0)} |",
+                f"| 绑定解析次数 | {binding_ops.get('resolves', 0)} |",
+                f"| LLM Fallback 次数 | {binding_ops.get('fallbacks', 0)} |",
+                f"| 总绑定数 | {total} |",
+                f"| 成功解析 | {resolved} |",
+                f"| 需要 Fallback | {fallback} |",
+                f"| 绑定成功率 | {success_rate:.1f}% |",
+                "",
+            ])
         
         # 添加流程事件统计（如果有）
         if trace.get("flow_events"):
@@ -278,6 +325,141 @@ class ExecutionReportGenerator:
                     f"| 重规划 | {flow.get('replans', 0)} |",
                     "",
                 ])
+        
+        # 添加一致性检查点（如果有）
+        checkpoints = report_data.get("checkpoints", [])
+        if checkpoints:
+            lines.extend([
+                "## 一致性检查点",
+                "",
+                "执行过程中注册的关键检查点，用于后续一致性验证和问题修正。",
+                "",
+            ])
+            for cp in checkpoints:
+                cp_id = cp.get("checkpoint_id", "unknown")
+                cp_type = cp.get("checkpoint_type", "unknown")
+                step_id = cp.get("step_id", "?")
+                
+                lines.append(f"### 📍 {cp_id} [{cp_type}]")
+                lines.append("")
+                lines.append(f"- **步骤**: Step {step_id}")
+                
+                # 显示关键元素
+                key_elements = cp.get("key_elements", {})
+                if key_elements:
+                    lines.append("- **关键元素**:")
+                    for elem_type, elements in key_elements.items():
+                        if isinstance(elements, list):
+                            lines.append(f"  - {elem_type}: {', '.join(str(e) for e in elements[:10])}")
+                            if len(elements) > 10:
+                                lines.append(f"    ... 还有 {len(elements) - 10} 个")
+                        else:
+                            lines.append(f"  - {elem_type}: {elements}")
+                
+                # 显示约束
+                constraints = cp.get("constraints", [])
+                if constraints:
+                    lines.append("- **约束条件**:")
+                    for c in constraints[:5]:
+                        lines.append(f"  - {c}")
+                    if len(constraints) > 5:
+                        lines.append(f"  - ... 还有 {len(constraints) - 5} 条")
+                
+                lines.append("")
+        
+        # 添加一致性违规（如果有）
+        violations = report_data.get("consistency_violations", [])
+        if violations:
+            lines.extend([
+                "## ⚠️ 一致性违规",
+                "",
+                "执行过程中检测到的一致性问题，可用于后续修正。",
+                "",
+                "| 严重程度 | 检查点 | 问题描述 | 建议 |",
+                "|----------|--------|----------|------|",
+            ])
+            for v in violations:
+                severity = v.get("severity", "warning")
+                severity_icon = "🔴" if severity == "critical" else "🟡"
+                cp_id = v.get("checkpoint_id", "N/A")
+                desc = v.get("description", "未知问题")[:50]
+                suggestion = v.get("suggestion", "")[:30]
+                lines.append(f"| {severity_icon} {severity} | {cp_id} | {desc} | {suggestion} |")
+            lines.append("")
+        
+        # 添加工作记忆（如果有）
+        working_memory = report_data.get("working_memory", {})
+        if working_memory:
+            lines.extend([
+                "## 🧠 工作记忆",
+                "",
+                "执行过程中提取的设计决策、约束和待办事项。",
+                "",
+            ])
+            
+            # 设计决策
+            decisions = working_memory.get("decisions", [])
+            if decisions:
+                lines.append("### 设计决策")
+                lines.append("")
+                for d in decisions[:10]:
+                    decision = d.get("decision", "")
+                    rationale = d.get("rationale", "")
+                    step = d.get("step_id", "?")
+                    lines.append(f"- **[Step {step}]** {decision}")
+                    if rationale:
+                        lines.append(f"  - 理由: {rationale[:100]}")
+                if len(decisions) > 10:
+                    lines.append(f"- ... 还有 {len(decisions) - 10} 条决策")
+                lines.append("")
+            
+            # 约束条件
+            constraints = working_memory.get("constraints", [])
+            if constraints:
+                lines.append("### 约束条件")
+                lines.append("")
+                for c in constraints[:10]:
+                    constraint = c.get("constraint", "")
+                    source = c.get("source", "")
+                    lines.append(f"- {constraint}")
+                    if source:
+                        lines.append(f"  - 来源: {source}")
+                if len(constraints) > 10:
+                    lines.append(f"- ... 还有 {len(constraints) - 10} 条约束")
+                lines.append("")
+            
+            # 接口定义
+            interfaces = working_memory.get("interfaces", [])
+            if interfaces:
+                lines.append("### 接口定义")
+                lines.append("")
+                for iface in interfaces[:10]:
+                    name = iface.get("name", "unknown")
+                    iface_type = iface.get("type", "")
+                    lines.append(f"- **{name}** ({iface_type})")
+                    signature = iface.get("signature", "")
+                    if signature:
+                        lines.append(f"  ```")
+                        lines.append(f"  {signature[:200]}")
+                        lines.append(f"  ```")
+                if len(interfaces) > 10:
+                    lines.append(f"- ... 还有 {len(interfaces) - 10} 个接口")
+                lines.append("")
+            
+            # 待办事项
+            todos = working_memory.get("todos", [])
+            if todos:
+                lines.append("### 待办事项")
+                lines.append("")
+                for t in todos[:10]:
+                    todo = t.get("todo", "")
+                    priority = t.get("priority", "medium")
+                    status = t.get("status", "pending")
+                    status_icon = "✅" if status == "done" else "⏳"
+                    lines.append(f"- {status_icon} [{priority}] {todo}")
+                if len(todos) > 10:
+                    lines.append(f"- ... 还有 {len(todos) - 10} 条待办")
+                lines.append("")
         
         lines.extend([
             "## 执行流程",
