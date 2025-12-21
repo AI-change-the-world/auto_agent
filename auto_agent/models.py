@@ -443,7 +443,9 @@ class ToolPostPolicy:
         return {
             "validation": self.validation.to_dict() if self.validation else None,
             "post_success": self.post_success.to_dict() if self.post_success else None,
-            "result_handling": self.result_handling.to_dict() if self.result_handling else None,
+            "result_handling": self.result_handling.to_dict()
+            if self.result_handling
+            else None,
         }
 
     @classmethod
@@ -502,15 +504,23 @@ class ToolPostPolicy:
 
     def should_check_consistency(self) -> bool:
         """是否需要一致性检查"""
-        return self.post_success is not None and self.post_success.requires_consistency_check
+        return (
+            self.post_success is not None
+            and self.post_success.requires_consistency_check
+        )
 
     def should_register_checkpoint(self) -> bool:
         """是否需要注册检查点"""
-        return self.result_handling is not None and self.result_handling.register_as_checkpoint
+        return (
+            self.result_handling is not None
+            and self.result_handling.register_as_checkpoint
+        )
 
     def should_extract_working_memory(self) -> bool:
         """是否需要提取工作记忆"""
-        return self.post_success is not None and self.post_success.extract_working_memory
+        return (
+            self.post_success is not None and self.post_success.extract_working_memory
+        )
 
 
 # ==================== 消息模型 ====================

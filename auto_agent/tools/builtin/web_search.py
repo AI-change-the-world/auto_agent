@@ -2,11 +2,7 @@
 网页搜索工具（示例）
 """
 
-from auto_agent.models import (
-    ResultHandlingConfig,
-    ToolPostPolicy,
-    ValidationConfig,
-)
+from auto_agent.models import ResultHandlingConfig, ToolPostPolicy, ValidationConfig
 from auto_agent.tools.base import BaseTool
 from auto_agent.tools.models import ToolDefinition, ToolParameter
 from auto_agent.tools.registry import tool

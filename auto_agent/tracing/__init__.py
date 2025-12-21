@@ -9,38 +9,38 @@ Agent Tracing System - 智能体执行追踪系统
 
 使用方式：
     from auto_agent.tracing import Tracer, get_current_trace
-    
+
     # 开始追踪
     with Tracer.start("user_query") as trace:
         # 执行逻辑...
         pass
-    
+
     # 获取追踪结果
     report = trace.to_dict()
 """
 
-from auto_agent.tracing.models import (
-    TraceEvent,
-    LLMCallEvent,
-    ToolCallEvent,
-    FlowEvent,
-    MemoryEvent,
-    BindingEvent,
-    BindingAction,
-    TraceSpan,
-    TraceContext,
-    LLMPurpose,
-)
 from auto_agent.tracing.context import (
     Tracer,
-    get_current_trace,
     get_current_span,
-    trace_llm_call,
-    trace_tool_call,
-    trace_flow_event,
-    trace_memory_event,
+    get_current_trace,
+    start_span,
     trace_binding_event,
-    start_span
+    trace_flow_event,
+    trace_llm_call,
+    trace_memory_event,
+    trace_tool_call,
+)
+from auto_agent.tracing.models import (
+    BindingAction,
+    BindingEvent,
+    FlowEvent,
+    LLMCallEvent,
+    LLMPurpose,
+    MemoryEvent,
+    ToolCallEvent,
+    TraceContext,
+    TraceEvent,
+    TraceSpan,
 )
 
 __all__ = [
@@ -64,5 +64,5 @@ __all__ = [
     "trace_flow_event",
     "trace_memory_event",
     "trace_binding_event",
-    "start_span"
+    "start_span",
 ]

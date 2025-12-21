@@ -5,7 +5,12 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(
+    0,
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ),
+)
 
 from auto_agent.core.context import ExecutionContext
 
@@ -99,7 +104,7 @@ def test_working_memory_for_project():
 
     # 验证 LLM 上下文包含工作记忆
     llm_context = ctx.to_llm_context(include_memories=False)
-    
+
     checks = [
         ("设计决策" in llm_context, "包含设计决策"),
         ("约束" in llm_context, "包含约束条件"),

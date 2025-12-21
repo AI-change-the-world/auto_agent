@@ -4,9 +4,11 @@ Binding Planner 单元测试
 测试参数绑定规划器的核心功能
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from auto_agent.core.binding_planner import BindingPlanner
 from auto_agent.models import (
     BindingFallbackPolicy,
     BindingPlan,
@@ -18,10 +20,8 @@ from auto_agent.models import (
     ToolDefinition,
     ToolParameter,
 )
-from auto_agent.core.binding_planner import BindingPlanner
-from auto_agent.tools.registry import ToolRegistry
 from auto_agent.tools.base import BaseTool
-
+from auto_agent.tools.registry import ToolRegistry
 
 # ==================== Mock 工具 ====================
 
@@ -72,6 +72,14 @@ class MockDesignTool(BaseTool):
                     type="array",
                     description="关系列表",
                     required=False,
+                    default=[],
+                ),
+                ToolParameter(
+                    name="max_results",
+                    type="number",
+                    description="返回结果数量上限（可选）",
+                    required=False,
+                    default=10,
                 ),
             ],
             output_schema={
@@ -193,7 +201,10 @@ class TestStepBindings:
         assert step_bindings.step_id == "2"
         assert step_bindings.tool == "design"
         assert "entities" in step_bindings.bindings
-        assert step_bindings.bindings["entities"].source_type == BindingSourceType.STEP_OUTPUT
+        assert (
+            step_bindings.bindings["entities"].source_type
+            == BindingSourceType.STEP_OUTPUT
+        )
 
 
 class TestBindingPlan:
@@ -263,7 +274,8 @@ class TestBindingPlanner:
     def mock_llm_client(self):
         """创建 Mock LLM 客户端"""
         client = MagicMock()
-        client.chat = AsyncMock(return_value="""```json
+        client.chat = AsyncMock(
+            return_value="""```json
 {
     "bindings": [
         {
@@ -293,6 +305,12 @@ class TestBindingPlanner:
                     "source_type": "step_output",
                     "confidence": 0.9,
                     "reasoning": "来自分析步骤的关系输出"
+                },
+                "max_results": {
+                    "source": "",
+                    "source_type": "generated",
+                    "confidence": 0.2,
+                    "reasoning": "用户未明确指定，使用默认值即可"
                 }
             }
         },
@@ -311,7 +329,8 @@ class TestBindingPlanner:
     ],
     "reasoning": "三步流程：分析需求 -> 设计API -> 生成代码"
 }
-```""")
+```"""
+        )
         return client
 
     @pytest.fixture
@@ -347,7 +366,9 @@ class TestBindingPlanner:
         step1 = binding_plan.get_step_bindings("1")
         assert step1 is not None
         assert "requirements" in step1.bindings
-        assert step1.bindings["requirements"].source_type == BindingSourceType.USER_INPUT
+        assert (
+            step1.bindings["requirements"].source_type == BindingSourceType.USER_INPUT
+        )
 
         # 验证步骤2绑定
         step2 = binding_plan.get_step_bindings("2")
@@ -355,6 +376,13 @@ class TestBindingPlanner:
         assert "entities" in step2.bindings
         assert step2.bindings["entities"].source_type == BindingSourceType.STEP_OUTPUT
         assert step2.bindings["entities"].source == "step_1.output.entities"
+        # 工具 schema 默认值应注入到 default_value（即便 LLM 未显式返回）
+        assert step2.bindings["relationships"].default_value == []
+        # GENERATED + 工具默认值 => fallback 自动切换为 USE_DEFAULT
+        assert step2.bindings["max_results"].default_value == 10
+        assert (
+            step2.bindings["max_results"].fallback == BindingFallbackPolicy.USE_DEFAULT
+        )
 
         # 验证步骤3绑定
         step3 = binding_plan.get_step_bindings("3")

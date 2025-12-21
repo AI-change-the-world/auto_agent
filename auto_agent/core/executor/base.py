@@ -13,6 +13,17 @@ import asyncio
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from auto_agent.core.context import ExecutionContext
+from auto_agent.core.executor.consistency import ConsistencyManager
+
+# 导入子模块
+from auto_agent.core.executor.param_builder import ParameterBuilder
+from auto_agent.core.executor.post_policy import PostPolicyManager
+from auto_agent.core.executor.replan import ExecutionPattern, PatternType, ReplanManager
+from auto_agent.core.executor.state import (
+    compress_state_for_llm,
+    get_nested_value,
+    update_state_from_result,
+)
 from auto_agent.llm.client import LLMClient
 from auto_agent.models import (
     BindingPlan,
@@ -25,17 +36,6 @@ from auto_agent.models import (
 from auto_agent.retry.controller import RetryController
 from auto_agent.retry.models import ErrorRecoveryRecord, ErrorType, RetryConfig
 from auto_agent.tools.registry import ToolRegistry
-
-# 导入子模块
-from auto_agent.core.executor.param_builder import ParameterBuilder
-from auto_agent.core.executor.replan import ReplanManager, ExecutionPattern, PatternType
-from auto_agent.core.executor.consistency import ConsistencyManager
-from auto_agent.core.executor.post_policy import PostPolicyManager
-from auto_agent.core.executor.state import (
-    get_nested_value,
-    compress_state_for_llm,
-    update_state_from_result,
-)
 
 # 重新导出供外部使用
 __all__ = ["ExecutionEngine", "ExecutionPattern", "PatternType"]
@@ -65,7 +65,7 @@ class ExecutionEngine:
         self._memory_storage_path = memory_storage_path
         self.context: Optional[ExecutionContext] = None
         self._memory_systems: Dict[str, Any] = {}
-        
+
         # 子模块（在 execute_plan_stream 中初始化）
         self._param_builder: Optional[ParameterBuilder] = None
         self._replan_manager: Optional[ReplanManager] = None
@@ -78,6 +78,7 @@ class ExecutionEngine:
             return self._memory_systems[user_id]
 
         from pathlib import Path
+
         from auto_agent.memory.system import MemorySystem
 
         if self._memory_storage_path:
@@ -102,7 +103,9 @@ class ExecutionEngine:
         """从嵌套字典中获取值（兼容旧代码）"""
         return get_nested_value(data, path)
 
-    def _compress_state_for_llm(self, state: Dict[str, Any], max_chars: int = 4000) -> str:
+    def _compress_state_for_llm(
+        self, state: Dict[str, Any], max_chars: int = 4000
+    ) -> str:
         """压缩状态信息（兼容旧代码）"""
         return compress_state_for_llm(state, max_chars)
 
@@ -134,7 +137,6 @@ class ExecutionEngine:
         if self._param_builder:
             return self._param_builder.validate_parameters(arguments, tool)
         return True, []
-
 
     # ==================== 主执行方法 ====================
 
@@ -205,6 +207,7 @@ class ExecutionEngine:
         agent_info: Optional[Dict[str, Any]] = None,
         enable_tracing: bool = True,
         binding_plan: Optional[BindingPlan] = None,
+        binding_planner: Optional[Any] = None,
     ):
         """
         流式执行计划（AsyncGenerator）
@@ -217,6 +220,7 @@ class ExecutionEngine:
             agent_info: Agent 信息
             enable_tracing: 是否启用追踪
             binding_plan: 参数绑定计划
+            binding_planner: 参数绑定规划器（可选，用于 replan 后自动刷新 binding_plan）
 
         Yields:
             Dict: 事件字典
@@ -318,32 +322,57 @@ class ExecutionEngine:
                 # 一致性检查
                 consistency_violations = []
                 if execution_strategy and self.llm_client and self.context:
-                    tool_for_check = self.tool_registry.get_tool(subtask.tool) if subtask.tool else None
+                    tool_for_check = (
+                        self.tool_registry.get_tool(subtask.tool)
+                        if subtask.tool
+                        else None
+                    )
                     should_check_consistency = False
-                    if tool_for_check and hasattr(tool_for_check, "definition") and tool_for_check.definition.replan_policy:
+                    if (
+                        tool_for_check
+                        and hasattr(tool_for_check, "definition")
+                        and tool_for_check.definition.replan_policy
+                    ):
                         policy = tool_for_check.definition.replan_policy
                         if policy.requires_consistency_check or policy.high_impact:
                             should_check_consistency = True
                     if execution_strategy.require_phase_review:
                         should_check_consistency = True
 
-                    if should_check_consistency and self.context.consistency_checker.checkpoints:
-                        pre_check_args = await self._build_tool_arguments(subtask, state, tool_for_check) if tool_for_check else {}
-                        consistency_violations = await self._consistency_manager.check_consistency(
-                            step=subtask,
-                            arguments=pre_check_args,
-                            state=state,
+                    if (
+                        should_check_consistency
+                        and self.context.consistency_checker.checkpoints
+                    ):
+                        pre_check_args = (
+                            await self._build_tool_arguments(
+                                subtask, state, tool_for_check
+                            )
+                            if tool_for_check
+                            else {}
+                        )
+                        consistency_violations = (
+                            await self._consistency_manager.check_consistency(
+                                step=subtask,
+                                arguments=pre_check_args,
+                                state=state,
+                            )
                         )
 
                         if consistency_violations:
-                            critical_violations = [v for v in consistency_violations if v.severity == "critical"]
+                            critical_violations = [
+                                v
+                                for v in consistency_violations
+                                if v.severity == "critical"
+                            ]
                             if critical_violations:
                                 yield {
                                     "event": "consistency_violation",
                                     "data": {
                                         "step": step_num,
                                         "step_id": subtask.id,
-                                        "violations": [v.to_dict() for v in critical_violations],
+                                        "violations": [
+                                            v.to_dict() for v in critical_violations
+                                        ],
                                         "severity": "critical",
                                         "message": f"检测到 {len(critical_violations)} 个严重一致性违规",
                                     },
@@ -358,8 +387,16 @@ class ExecutionEngine:
                 # 执行步骤
                 args = {}
                 if tool_executor:
-                    tool = self.tool_registry.get_tool(subtask.tool) if subtask.tool else None
-                    args = await self._build_tool_arguments(subtask, state, tool) if tool else {}
+                    tool = (
+                        self.tool_registry.get_tool(subtask.tool)
+                        if subtask.tool
+                        else None
+                    )
+                    args = (
+                        await self._build_tool_arguments(subtask, state, tool)
+                        if tool
+                        else {}
+                    )
                     output = await tool_executor(subtask.tool, args)
                     result = SubTaskResult(
                         step_id=subtask.id,
@@ -368,7 +405,9 @@ class ExecutionEngine:
                         error=output.get("error"),
                     )
                 else:
-                    result = await self._execute_subtask(subtask, state, conversation_id)
+                    result = await self._execute_subtask(
+                        subtask, state, conversation_id
+                    )
 
                 results.append(result)
 
@@ -420,7 +459,9 @@ class ExecutionEngine:
                 if result.success and result.output:
                     self._step_outputs[subtask.id] = result.output
                     if self._param_builder:
-                        self._param_builder.update_step_output(subtask.id, result.output)
+                        self._param_builder.update_step_output(
+                            subtask.id, result.output
+                        )
 
                 # 发送步骤完成事件
                 yield {
@@ -495,6 +536,11 @@ class ExecutionEngine:
                         break
 
             except Exception as e:
+                result = SubTaskResult(
+                    step_id=subtask.id,
+                    success=False,
+                    error=str(e),
+                )
                 yield {
                     "event": "stage_error",
                     "data": {
@@ -503,14 +549,15 @@ class ExecutionEngine:
                         "error": str(e),
                     },
                 }
-                results.append(SubTaskResult(
-                    step_id=subtask.id,
-                    success=False,
-                    error=str(e),
-                ))
+                results.append(
+                    result
+                )
 
             # 检查是否需要重规划
-            should_check, check_reason = await self._replan_manager.should_trigger_replan(
+            (
+                should_check,
+                check_reason,
+            ) = await self._replan_manager.should_trigger_replan(
                 step=subtask,
                 result=result,
                 execution_strategy=execution_strategy,
@@ -536,7 +583,9 @@ class ExecutionEngine:
                         "data": {
                             "step": step_num,
                             "trigger_reason": check_reason,
-                            "reason": new_plan.warnings[0] if new_plan.warnings else "检测到执行问题，触发重规划",
+                            "reason": new_plan.warnings[0]
+                            if new_plan.warnings
+                            else "检测到执行问题，触发重规划",
                             "new_plan_intent": new_plan.intent,
                             "new_steps_count": len(new_plan.subtasks),
                             "message": f"执行计划已重新规划，新计划包含 {len(new_plan.subtasks)} 个步骤",
@@ -544,6 +593,51 @@ class ExecutionEngine:
                     }
 
                     plan = new_plan
+                    # replan 后旧 binding_plan 可能与新计划不匹配：默认丢弃；如果提供 binding_planner 则立即重建
+                    self._binding_plan = None
+                    if self._param_builder:
+                        self._param_builder.binding_plan = None
+
+                    if binding_planner is not None:
+                        try:
+                            rebuilt = await binding_planner.create_binding_plan(
+                                execution_plan=plan,
+                                user_input=state.get("inputs", {}).get("query", "")
+                                or "",
+                                initial_state=state,
+                            )
+                            # 仅当真正有 bindings 时才启用（空计划等场景会返回 steps=[]）
+                            if rebuilt and rebuilt.steps:
+                                self._binding_plan = rebuilt
+                                if self._param_builder:
+                                    self._param_builder.binding_plan = rebuilt
+
+                                yield {
+                                    "event": "binding_plan",
+                                    "data": {
+                                        "success": True,
+                                        "phase": "replan",
+                                        "message": f"重规划后已刷新参数绑定，共 {len(rebuilt.steps)} 个步骤",
+                                        "bindings_count": sum(
+                                            len(s.bindings) for s in rebuilt.steps
+                                        ),
+                                        "reasoning": rebuilt.reasoning,
+                                        "confidence_threshold": rebuilt.confidence_threshold,
+                                    },
+                                }
+                        except Exception as e:
+                            yield {
+                                "event": "binding_plan",
+                                "data": {
+                                    "success": False,
+                                    "phase": "replan",
+                                    "message": f"重规划后参数绑定刷新失败，将 fallback 到运行时推理: {str(e)}",
+                                    "bindings_count": 0,
+                                    "error": str(e),
+                                    "fallback": "llm_infer",
+                                },
+                            }
+
                     current_step_index = 0
                     continue
 
@@ -577,7 +671,6 @@ class ExecutionEngine:
                 "trace_full": trace_data_full,
             },
         }
-
 
     # ==================== 子任务执行 ====================
 
@@ -740,7 +833,9 @@ class ExecutionEngine:
                 error_analysis = await self.retry_controller.analyze_error(
                     exception=e,
                     context={"state": state, "arguments": arguments},
-                    tool_definition=tool.definition if hasattr(tool, "definition") else None,
+                    tool_definition=tool.definition
+                    if hasattr(tool, "definition")
+                    else None,
                 )
 
                 if not error_analysis.is_recoverable:
@@ -760,11 +855,15 @@ class ExecutionEngine:
                     )
 
                 if error_analysis.error_type == ErrorType.PARAMETER_ERROR:
-                    fixed_arguments = await self.retry_controller.suggest_parameter_fixes(
-                        failed_params=arguments,
-                        error_analysis=error_analysis,
-                        context={"state": state},
-                        tool_definition=tool.definition if hasattr(tool, "definition") else None,
+                    fixed_arguments = (
+                        await self.retry_controller.suggest_parameter_fixes(
+                            failed_params=arguments,
+                            error_analysis=error_analysis,
+                            context={"state": state},
+                            tool_definition=tool.definition
+                            if hasattr(tool, "definition")
+                            else None,
+                        )
                     )
                     if fixed_arguments != arguments:
                         arguments = fixed_arguments
@@ -800,7 +899,9 @@ class ExecutionEngine:
             return None
 
         tool_def = original_tool.definition
-        alternative_tools = tool_def.alternative_tools if tool_def.alternative_tools else []
+        alternative_tools = (
+            tool_def.alternative_tools if tool_def.alternative_tools else []
+        )
 
         if not alternative_tools:
             return None
@@ -827,7 +928,9 @@ class ExecutionEngine:
                     template_variables=subtask.template_variables,
                 )
 
-                arguments = await self._build_tool_arguments(alt_subtask, state, alt_tool)
+                arguments = await self._build_tool_arguments(
+                    alt_subtask, state, alt_tool
+                )
 
                 if asyncio.iscoroutinefunction(alt_tool.execute):
                     output = await alt_tool.execute(**arguments)
@@ -851,7 +954,6 @@ class ExecutionEngine:
                 continue
 
         return None
-
 
     # ==================== 参数构造 ====================
 
@@ -884,7 +986,11 @@ class ExecutionEngine:
         binding_resolved = {}
         binding_details = []
 
-        if self._param_builder and hasattr(self, '_binding_plan') and self._binding_plan:
+        if (
+            self._param_builder
+            and hasattr(self, "_binding_plan")
+            and self._binding_plan
+        ):
             step_bindings = self._binding_plan.get_step_bindings(subtask.id)
             if step_bindings:
                 with start_span(
@@ -895,7 +1001,11 @@ class ExecutionEngine:
                     bindings_count=len(step_bindings.bindings),
                     confidence_threshold=self._binding_plan.confidence_threshold,
                 ):
-                    resolved, needs_fallback, details = await self._param_builder.resolve_bindings_with_trace(
+                    (
+                        resolved,
+                        needs_fallback,
+                        details,
+                    ) = await self._param_builder.resolve_bindings_with_trace(
                         step_bindings=step_bindings,
                         state=state,
                         existing_args=arguments,
@@ -926,15 +1036,65 @@ class ExecutionEngine:
                         param_name = field.split(".")[-1]
                         arguments[param_name] = value
 
+        # 4.5 在不调用 LLM 的情况下尽量补齐参数（默认值/别名映射）
+        # - 目的：减少不必要的 LLM fallback，尤其是 required 参数存在默认值或可从 state 映射时
+        if tool and hasattr(tool, "definition"):
+            try:
+                import copy
+
+                tool_def = tool.definition
+
+                # (a) param_aliases: {param_name: state_field_path}
+                # 允许 path 为 "inputs.query"/"steps.1.output.xxx"/"documents" 等
+                if getattr(tool_def, "param_aliases", None):
+                    for param_name, state_path in tool_def.param_aliases.items():
+                        if (
+                            param_name in arguments
+                            and arguments[param_name] is not None
+                        ):
+                            continue
+                        if not state_path:
+                            continue
+
+                        value = None
+                        if isinstance(state_path, str):
+                            # 兼容写法：允许 "state.xxx"
+                            if state_path.startswith("state."):
+                                value = get_nested_value(state, state_path[6:])
+                            else:
+                                value = (
+                                    get_nested_value(state, state_path)
+                                    if "." in state_path
+                                    else state.get(state_path)
+                                )
+
+                        if value is not None:
+                            arguments[param_name] = value
+
+                # (b) 工具 schema 默认值：优先用于 required 参数缺失的场景
+                for p in tool_def.parameters:
+                    if p.name in arguments and arguments[p.name] is not None:
+                        continue
+                    if p.required and p.default is not None:
+                        # 避免可变对象共享（list/dict）
+                        arguments[p.name] = copy.deepcopy(p.default)
+            except Exception:
+                # 默认值/别名补齐失败不影响主流程
+                pass
+
         # 5. 对于需要 fallback 的参数，使用 LLM 推理
         if self.llm_client and tool and self._param_builder:
             tool_def = tool.definition
             missing_required = []
             for p in tool_def.parameters:
-                if p.required and (p.name not in arguments or arguments[p.name] is None):
+                if p.required and (
+                    p.name not in arguments or arguments[p.name] is None
+                ):
                     missing_required.append(p.name)
 
-            if missing_required or fallback_params or not binding_used:
+            # 仅当确实存在“必需参数缺失”或“绑定解析需要 fallback”的参数时才调用 LLM
+            # （没有 binding_plan 并不等于需要 LLM）
+            if missing_required or fallback_params:
                 fallback_reason = []
                 if not binding_used:
                     fallback_reason.append("no_binding_plan")
@@ -968,7 +1128,9 @@ class ExecutionEngine:
                         subtask, state, tool, arguments
                     )
 
-                    new_params = [k for k in arguments.keys() if k not in args_before_fallback]
+                    new_params = [
+                        k for k in arguments.keys() if k not in args_before_fallback
+                    ]
                     trace_flow_event(
                         action="fallback",
                         reason=f"LLM fallback 完成: 新增 {len(new_params)} 个参数",
@@ -1025,7 +1187,9 @@ class ExecutionEngine:
                     category="error_recovery",
                     content=memory_content,
                 )
-            elif hasattr(memory_system, "l2_semantic") and hasattr(memory_system.l2_semantic, "add"):
+            elif hasattr(memory_system, "l2_semantic") and hasattr(
+                memory_system.l2_semantic, "add"
+            ):
                 memory_system.l2_semantic.add(
                     content=str(memory_content),
                     metadata={"category": "error_recovery", "tool_name": tool_name},
@@ -1042,7 +1206,9 @@ class ExecutionEngine:
         mode: ValidationMode = ValidationMode.LOOSE,
     ) -> Tuple[bool, str]:
         """评估执行结果是否满足期望"""
-        validate_fn = tool.definition.validate_function if hasattr(tool, "definition") else None
+        validate_fn = (
+            tool.definition.validate_function if hasattr(tool, "definition") else None
+        )
 
         if validate_fn is None:
             success = result.get("success", False)
@@ -1053,9 +1219,13 @@ class ExecutionEngine:
 
         try:
             if asyncio.iscoroutinefunction(validate_fn):
-                return await validate_fn(result, expectations, state, mode, self.llm_client, None)
+                return await validate_fn(
+                    result, expectations, state, mode, self.llm_client, None
+                )
             else:
-                return validate_fn(result, expectations, state, mode, self.llm_client, None)
+                return validate_fn(
+                    result, expectations, state, mode, self.llm_client, None
+                )
         except Exception as e:
             return result.get("success", False), f"验证异常: {str(e)}"
 
@@ -1072,11 +1242,13 @@ class ExecutionEngine:
         if "failed_steps" not in state["control"]:
             state["control"]["failed_steps"] = []
 
-        state["control"]["failed_steps"].append({
-            "step": subtask.id,
-            "name": subtask.tool,
-            "error": result.error,
-        })
+        state["control"]["failed_steps"].append(
+            {
+                "step": subtask.id,
+                "name": subtask.tool,
+                "error": result.error,
+            }
+        )
 
         if "last_failure" not in state:
             state["last_failure"] = {}
@@ -1109,13 +1281,21 @@ class ExecutionEngine:
         if "重试" in strategy_lower or "retry" in strategy_lower:
             return FailAction(type="retry", max_retries=3)
 
-        if "回退" in strategy_lower or "返回" in strategy_lower or "goto" in strategy_lower:
+        if (
+            "回退" in strategy_lower
+            or "返回" in strategy_lower
+            or "goto" in strategy_lower
+        ):
             match = re.search(r"步骤\s*(\d+)", strategy)
             if match:
                 return FailAction(type="goto", target_step=match.group(1))
             return FailAction(type="retry")
 
-        if "停止" in strategy_lower or "终止" in strategy_lower or "abort" in strategy_lower:
+        if (
+            "停止" in strategy_lower
+            or "终止" in strategy_lower
+            or "abort" in strategy_lower
+        ):
             return FailAction(type="abort")
 
         return FailAction(type="fallback")
@@ -1240,7 +1420,9 @@ class ExecutionEngine:
     ) -> None:
         """注册一致性检查点（兼容旧代码）"""
         if self._consistency_manager:
-            await self._consistency_manager.register_consistency_checkpoint(step, result, state)
+            await self._consistency_manager.register_consistency_checkpoint(
+                step, result, state
+            )
 
     async def _check_consistency(
         self,
@@ -1250,7 +1432,9 @@ class ExecutionEngine:
     ) -> List:
         """检查一致性（兼容旧代码）"""
         if self._consistency_manager:
-            return await self._consistency_manager.check_consistency(step, arguments, state)
+            return await self._consistency_manager.check_consistency(
+                step, arguments, state
+            )
         return []
 
     async def _apply_post_policy(
@@ -1275,5 +1459,7 @@ class ExecutionEngine:
     def _get_validation_action(self, tool: Any, validation_passed: bool) -> str:
         """获取验证失败后的动作（兼容旧代码）"""
         if self._post_policy_manager:
-            return self._post_policy_manager.get_validation_action(tool, validation_passed)
+            return self._post_policy_manager.get_validation_action(
+                tool, validation_passed
+            )
         return "retry" if not validation_passed else "continue"

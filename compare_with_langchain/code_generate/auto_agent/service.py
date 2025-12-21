@@ -1,54 +1,57 @@
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from models import (
-    BaseSchema,
-    ProjectStatusEnum,
-    ProjectBase,
-    CreateProjectRequest,
-    UpdateProjectRequest,
-    ProjectResponse,
-    ProjectListResponse,
-    UserBase,
-    UserResponse,
-    UserListResponse,
-    ProjectMemberBase,
     AddProjectMemberRequest,
-    ProjectMemberResponse,
-    ProjectMemberListResponse,
-    TaskStatusEnum,
-    TaskPriorityEnum,
-    TaskBase,
-    CreateTaskRequest,
-    UpdateTaskRequest,
-    TaskResponse,
-    TaskListResponse,
-    TagBase,
-    CreateTagRequest,
-    UpdateTagRequest,
-    TagResponse,
-    TagListResponse,
-    TaskTagBase,
     AddTaskTagRequest,
-    TaskTagResponse,
-    CommentBase,
-    CreateCommentRequest,
-    UpdateCommentRequest,
-    CommentResponse,
-    CommentListResponse,
     AttachmentBase,
-    CreateAttachmentRequest,
-    AttachmentResponse,
     AttachmentListResponse,
-    EmptyResponse
+    AttachmentResponse,
+    BaseSchema,
+    CommentBase,
+    CommentListResponse,
+    CommentResponse,
+    CreateAttachmentRequest,
+    CreateCommentRequest,
+    CreateProjectRequest,
+    CreateTagRequest,
+    CreateTaskRequest,
+    EmptyResponse,
+    ProjectBase,
+    ProjectListResponse,
+    ProjectMemberBase,
+    ProjectMemberListResponse,
+    ProjectMemberResponse,
+    ProjectResponse,
+    ProjectStatusEnum,
+    TagBase,
+    TagListResponse,
+    TagResponse,
+    TaskBase,
+    TaskListResponse,
+    TaskPriorityEnum,
+    TaskResponse,
+    TaskStatusEnum,
+    TaskTagBase,
+    TaskTagResponse,
+    UpdateCommentRequest,
+    UpdateProjectRequest,
+    UpdateTagRequest,
+    UpdateTaskRequest,
+    UserBase,
+    UserListResponse,
+    UserResponse,
 )
+
 
 # Custom exceptions
 class NotFoundException(Exception):
     pass
 
+
 class BadRequestException(Exception):
     pass
+
 
 class ForbiddenException(Exception):
     pass
@@ -61,10 +64,7 @@ class BaseService:
 
 class ProjectService(BaseService):
     async def get_projects(
-        self,
-        page: int = 1,
-        size: int = 10,
-        status: Optional[str] = None
+        self, page: int = 1, size: int = 10, status: Optional[str] = None
     ) -> ProjectListResponse:
         # Implementation would query the database with filters and pagination
         pass
@@ -77,7 +77,9 @@ class ProjectService(BaseService):
         # Implementation would fetch a single project by ID
         pass
 
-    async def update_project(self, id: int, request: UpdateProjectRequest) -> ProjectResponse:
+    async def update_project(
+        self, id: int, request: UpdateProjectRequest
+    ) -> ProjectResponse:
         # Implementation would update project details
         pass
 
@@ -87,11 +89,7 @@ class ProjectService(BaseService):
 
 
 class UserService(BaseService):
-    async def get_users(
-        self,
-        page: int = 1,
-        size: int = 10
-    ) -> UserListResponse:
+    async def get_users(self, page: int = 1, size: int = 10) -> UserListResponse:
         # Implementation would query users with pagination
         pass
 
@@ -106,14 +104,14 @@ class ProjectMemberService(BaseService):
         pass
 
     async def add_project_member(
-        self,
-        project_id: int,
-        request: AddProjectMemberRequest
+        self, project_id: int, request: AddProjectMemberRequest
     ) -> ProjectMemberResponse:
         # Implementation would add a user as a member to the project
         pass
 
-    async def remove_project_member(self, project_id: int, user_id: int) -> EmptyResponse:
+    async def remove_project_member(
+        self, project_id: int, user_id: int
+    ) -> EmptyResponse:
         # Implementation would remove a user from the project
         pass
 
@@ -126,12 +124,14 @@ class TaskService(BaseService):
         size: int = 10,
         parent_task_id: Optional[int] = None,
         status: Optional[str] = None,
-        assignee_id: Optional[int] = None
+        assignee_id: Optional[int] = None,
     ) -> TaskListResponse:
         # Implementation would fetch tasks under a project with optional filters
         pass
 
-    async def create_task(self, project_id: int, request: CreateTaskRequest) -> TaskResponse:
+    async def create_task(
+        self, project_id: int, request: CreateTaskRequest
+    ) -> TaskResponse:
         # Implementation would create a new task in the project
         pass
 
@@ -157,7 +157,9 @@ class TagService(BaseService):
         # Implementation would fetch all tags under a project
         pass
 
-    async def create_tag(self, project_id: int, request: CreateTagRequest) -> TagResponse:
+    async def create_tag(
+        self, project_id: int, request: CreateTagRequest
+    ) -> TagResponse:
         # Implementation would create a new tag in the project
         pass
 
@@ -176,9 +178,7 @@ class TagService(BaseService):
 
 class TaskTagService(BaseService):
     async def add_task_tag(
-        self,
-        task_id: int,
-        request: AddTaskTagRequest
+        self, task_id: int, request: AddTaskTagRequest
     ) -> TaskTagResponse:
         # Implementation would associate a tag with a task
         pass
@@ -193,7 +193,9 @@ class CommentService(BaseService):
         # Implementation would fetch all comments under a task
         pass
 
-    async def create_comment(self, task_id: int, request: CreateCommentRequest) -> CommentResponse:
+    async def create_comment(
+        self, task_id: int, request: CreateCommentRequest
+    ) -> CommentResponse:
         # Implementation would create a new comment on the task
         pass
 
@@ -201,7 +203,9 @@ class CommentService(BaseService):
         # Implementation would fetch a single comment by ID
         pass
 
-    async def update_comment(self, id: int, request: UpdateCommentRequest) -> CommentResponse:
+    async def update_comment(
+        self, id: int, request: UpdateCommentRequest
+    ) -> CommentResponse:
         # Implementation would update comment content
         pass
 
@@ -216,9 +220,7 @@ class AttachmentService(BaseService):
         pass
 
     async def create_attachment(
-        self,
-        task_id: int,
-        request: CreateAttachmentRequest
+        self, task_id: int, request: CreateAttachmentRequest
     ) -> AttachmentResponse:
         # Implementation would handle file upload and store metadata
         pass

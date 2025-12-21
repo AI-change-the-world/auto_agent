@@ -40,7 +40,6 @@ from auto_agent import (
 )
 from auto_agent.models import ToolReplanPolicy
 
-
 # ==================== LLM 客户端配置 ====================
 
 
@@ -64,7 +63,7 @@ def get_llm_client() -> Optional[OpenAIClient]:
 class DesignAPITool(BaseTool):
     """
     API 接口设计工具
-    
+
     这是一个高影响力工具，会产生后续步骤必须遵守的接口约束
     """
 
@@ -173,7 +172,7 @@ class DesignAPITool(BaseTool):
 class GenerateModelTool(BaseTool):
     """
     数据模型生成工具
-    
+
     必须基于 API 设计中定义的数据模型，保持一致性
     """
 
@@ -222,7 +221,7 @@ class GenerateModelTool(BaseTool):
     ) -> Dict[str, Any]:
         """生成数据模型代码"""
         data_models = api_design.get("data_models", [])
-        
+
         prompt = f"""请根据以下数据模型定义生成 {language} 代码。
 
 数据模型定义:
@@ -275,7 +274,7 @@ class GenerateModelTool(BaseTool):
 class ImplementServiceTool(BaseTool):
     """
     业务逻辑实现工具
-    
+
     必须使用之前定义的数据模型和 API 接口
     """
 
@@ -304,7 +303,10 @@ class ImplementServiceTool(BaseTool):
             category="code_generation",
             output_schema={
                 "service_code": {"type": "string", "description": "服务代码"},
-                "implemented_endpoints": {"type": "array", "description": "已实现的端点"},
+                "implemented_endpoints": {
+                    "type": "array",
+                    "description": "已实现的端点",
+                },
             },
             param_aliases={
                 "api_design": "api_design",
@@ -325,7 +327,7 @@ class ImplementServiceTool(BaseTool):
     ) -> Dict[str, Any]:
         """实现业务逻辑"""
         endpoints = api_design.get("endpoints", [])
-        
+
         prompt = f"""请根据以下 API 设计和数据模型实现业务逻辑代码。
 
 API 端点:
@@ -381,7 +383,7 @@ API 端点:
 class GenerateTestTool(BaseTool):
     """
     测试代码生成工具
-    
+
     必须覆盖所有已实现的端点
     """
 
@@ -477,7 +479,7 @@ class GenerateTestTool(BaseTool):
 class ReviewCodeTool(BaseTool):
     """
     代码审查工具
-    
+
     检查代码一致性和质量
     """
 
@@ -589,8 +591,6 @@ API 设计:
             return {"success": False, "error": str(e)}
 
 
-
-
 # ==================== 主程序 ====================
 
 
@@ -700,7 +700,9 @@ async def main():
                 print("-" * 50)
                 for step in data.get("steps", []):
                     pinned = "📌" if step.get("is_pinned") else "  "
-                    print(f"   {pinned} Step {step['step']}: [{step['name']}] {step['description'][:50]}...")
+                    print(
+                        f"   {pinned} Step {step['step']}: [{step['name']}] {step['description'][:50]}..."
+                    )
                 print("-" * 50)
 
             elif event_type == "stage_start":
@@ -730,7 +732,9 @@ async def main():
                         endpoints = result.get("endpoints", [])
                         print(f"   📤 设计了 {len(endpoints)} 个端点")
                         for ep in endpoints[:3]:
-                            print(f"      - {ep.get('method', '?')} {ep.get('path', '?')}")
+                            print(
+                                f"      - {ep.get('method', '?')} {ep.get('path', '?')}"
+                            )
 
                     if "model_code" in result:
                         code = result.get("model_code", "")
@@ -739,13 +743,17 @@ async def main():
                     if "service_code" in result:
                         code = result.get("service_code", "")
                         endpoints = result.get("implemented_endpoints", [])
-                        print(f"   📤 实现了 {len(endpoints)} 个端点 ({len(code)} 字符)")
+                        print(
+                            f"   📤 实现了 {len(endpoints)} 个端点 ({len(code)} 字符)"
+                        )
 
                     if "test_code" in result:
                         code = result.get("test_code", "")
                         coverage = result.get("test_coverage", {})
                         print(f"   📤 生成测试代码 ({len(code)} 字符)")
-                        print(f"      覆盖端点: {coverage.get('covered_endpoints', 0)}/{coverage.get('total_endpoints', 0)}")
+                        print(
+                            f"      覆盖端点: {coverage.get('covered_endpoints', 0)}/{coverage.get('total_endpoints', 0)}"
+                        )
 
                     if "review_result" in result:
                         review = result.get("review_result", {})
@@ -758,17 +766,21 @@ async def main():
 
                 # 保存结果
                 final_results[name] = result
-                execution_log.append({
-                    "step": step,
-                    "name": name,
-                    "success": success,
-                })
+                execution_log.append(
+                    {
+                        "step": step,
+                        "name": name,
+                        "success": success,
+                    }
+                )
 
             elif event_type == "consistency_violation":
                 violations = data.get("violations", [])
                 print(f"\n   ⚠️  一致性违规检测:")
                 for v in violations:
-                    print(f"      - [{v.get('severity', '?')}] {v.get('description', '')[:60]}...")
+                    print(
+                        f"      - [{v.get('severity', '?')}] {v.get('description', '')[:60]}..."
+                    )
 
             elif event_type == "stage_replan":
                 reason = data.get("reason", "")
@@ -781,7 +793,7 @@ async def main():
                 print("\n" + "=" * 70)
                 success = data.get("success", False)
                 iterations = data.get("iterations", 0)
-                
+
                 if success:
                     print(f"✅ 执行完成! (共 {iterations} 步)")
                 else:
@@ -808,9 +820,9 @@ async def main():
         print("=" * 70)
 
         # 获取执行上下文（如果可用）
-        if hasattr(agent, '_last_context') and agent._last_context:
+        if hasattr(agent, "_last_context") and agent._last_context:
             ctx = agent._last_context
-            
+
             # 工作记忆
             wm = ctx.working_memory
             print(f"\n🧠 工作记忆:")
@@ -876,6 +888,7 @@ async def main():
     except Exception as e:
         print(f"\n❌ 执行异常: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:

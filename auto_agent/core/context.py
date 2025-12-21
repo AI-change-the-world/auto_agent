@@ -337,7 +337,9 @@ class ConsistencyCheckpoint:
     """
 
     step_id: str  # 产生检查点的步骤 ID
-    artifact_type: str  # 产物类型: "code" / "document" / "config" / "interface" / "schema"
+    artifact_type: (
+        str  # 产物类型: "code" / "document" / "config" / "interface" / "schema"
+    )
     key_elements: Dict[str, Any]  # 关键元素（函数签名、接口定义、配置项等）
     constraints_for_future: List[str]  # 后续步骤必须遵守的约束
     timestamp: float = field(default_factory=time.time)

@@ -13,20 +13,20 @@ from typing import Any, Dict, List, Optional
 
 from auto_agent import (
     AutoAgent,
-    OpenAIClient,
-    ToolRegistry,
     ExecutionPlan,
+    ExecutionReportGenerator,
+    OpenAIClient,
     PlanStep,
     SubTaskResult,
-    ExecutionReportGenerator,
+    ToolRegistry,
 )
 
 from .tools import (
     AnalyzeRequirementsTool,
     DesignAPITool,
     GenerateModelsTool,
-    GenerateServiceTool,
     GenerateRouterTool,
+    GenerateServiceTool,
     GenerateTestsTool,
     ValidateProjectTool,
 )
@@ -53,7 +53,7 @@ def get_llm_client() -> Optional[OpenAIClient]:
 class FullstackGeneratorRunner:
     """
     全栈项目生成器执行器
-    
+
     封装了工具注册、Agent 创建、执行流程
     """
 
@@ -65,7 +65,7 @@ class FullstackGeneratorRunner:
         self.llm_client = llm_client or get_llm_client()
         self.output_dir = output_dir or Path(__file__).parent / "output"
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 执行结果收集
         self.execution_log: List[Dict[str, Any]] = []
         self.collected_plan: Optional[ExecutionPlan] = None
@@ -75,18 +75,20 @@ class FullstackGeneratorRunner:
         self.collected_trace_full: Optional[Dict[str, Any]] = None  # 完整版追踪数据
         self.collected_checkpoints: Optional[List[Dict[str, Any]]] = None  # 检查点数据
         self.collected_working_memory: Optional[Dict[str, Any]] = None  # 工作记忆数据
-        self.collected_violations: Optional[List[Dict[str, Any]]] = None  # 一致性违规数据
-        
+        self.collected_violations: Optional[List[Dict[str, Any]]] = (
+            None  # 一致性违规数据
+        )
+
         # 生成的代码
         self.generated_code: Dict[str, str] = {}
 
     def _create_registry(self, project_name: str) -> ToolRegistry:
         """创建工具注册表"""
         registry = ToolRegistry()
-        
+
         # 项目输出目录
         project_dir = str(self.output_dir / project_name)
-        
+
         # 注册所有工具
         registry.register(ProjectInitTool(str(self.output_dir)))
         registry.register(AnalyzeRequirementsTool(self.llm_client))
@@ -97,7 +99,7 @@ class FullstackGeneratorRunner:
         registry.register(GenerateTestsTool(self.llm_client))
         registry.register(ValidateProjectTool(self.llm_client))
         registry.register(CodeWriterTool(project_dir))
-        
+
         return registry
 
     def _create_agent(self, registry: ToolRegistry) -> AutoAgent:
@@ -130,12 +132,12 @@ class FullstackGeneratorRunner:
     ) -> Dict[str, Any]:
         """
         运行项目生成
-        
+
         Args:
             requirements: 项目需求描述
             project_name: 项目名称
             verbose: 是否显示详细输出
-            
+
         Returns:
             生成结果，包含代码和执行日志
         """
@@ -211,33 +213,39 @@ class FullstackGeneratorRunner:
                         if success and bindings_count > 0:
                             print(f"\n🔗 参数绑定规划完成:")
                             print(f"   📊 绑定数量: {bindings_count}")
-                            
+
                             # 显示置信度统计
                             output = data.get("output", {})
                             threshold = output.get("confidence_threshold", 0.7)
                             steps_bindings = output.get("steps", [])
-                            
+
                             # 统计高/低置信度绑定
                             high_conf = 0
                             low_conf = 0
                             source_type_stats = {}
-                            
+
                             for step_binding in steps_bindings:
                                 bindings = step_binding.get("bindings", {})
                                 for param, binding_info in bindings.items():
                                     confidence = binding_info.get("confidence", 0)
-                                    source_type = binding_info.get("source_type", "unknown")
-                                    
+                                    source_type = binding_info.get(
+                                        "source_type", "unknown"
+                                    )
+
                                     if confidence >= threshold:
                                         high_conf += 1
                                     else:
                                         low_conf += 1
-                                    
-                                    source_type_stats[source_type] = source_type_stats.get(source_type, 0) + 1
-                            
-                            print(f"   ✅ 高置信度: {high_conf} 个 (>= {threshold:.0%})")
+
+                                    source_type_stats[source_type] = (
+                                        source_type_stats.get(source_type, 0) + 1
+                                    )
+
+                            print(
+                                f"   ✅ 高置信度: {high_conf} 个 (>= {threshold:.0%})"
+                            )
                             print(f"   ⚠️  低置信度: {low_conf} 个 (需要 fallback)")
-                            
+
                             # 显示来源类型分布
                             if source_type_stats:
                                 print(f"   📈 来源类型分布:")
@@ -251,7 +259,7 @@ class FullstackGeneratorRunner:
                                 for st, count in source_type_stats.items():
                                     name = source_type_names.get(st, st)
                                     print(f"      • {name}: {count}")
-                            
+
                             print(f"   📝 {data.get('reasoning', '')[:100]}")
 
                             # 显示详细绑定信息
@@ -263,13 +271,23 @@ class FullstackGeneratorRunner:
                                     print(f"\n   Step {step_id} [{tool}]:")
                                     for param, binding_info in bindings.items():
                                         source = binding_info.get("source", "?")
-                                        source_type = binding_info.get("source_type", "?")
+                                        source_type = binding_info.get(
+                                            "source_type", "?"
+                                        )
                                         confidence = binding_info.get("confidence", 0)
                                         reasoning = binding_info.get("reasoning", "")
-                                        
-                                        conf_icon = "🟢" if confidence >= 0.8 else "🟡" if confidence >= 0.5 else "🔴"
+
+                                        conf_icon = (
+                                            "🟢"
+                                            if confidence >= 0.8
+                                            else "🟡"
+                                            if confidence >= 0.5
+                                            else "🔴"
+                                        )
                                         print(f"      {conf_icon} {param}:")
-                                        print(f"         来源: {source} ({source_type})")
+                                        print(
+                                            f"         来源: {source} ({source_type})"
+                                        )
                                         print(f"         置信度: {confidence:.0%}")
                                         if reasoning:
                                             print(f"         理由: {reasoning[:60]}...")
@@ -287,7 +305,9 @@ class FullstackGeneratorRunner:
                         print("📋 执行计划:")
                         print("-" * 50)
                         for step in data.get("steps", []):
-                            print(f"   Step {step['step']}: [{step['name']}] {step['description'][:50]}...")
+                            print(
+                                f"   Step {step['step']}: [{step['name']}] {step['description'][:50]}..."
+                            )
                         has_binding = data.get("has_binding_plan", False)
                         if has_binding:
                             print(f"   ✅ 已启用参数绑定")
@@ -331,7 +351,11 @@ class FullstackGeneratorRunner:
                         if success and isinstance(result, dict):
                             self._print_step_result(name, result)
                         elif not success:
-                            error = result.get("error", "未知错误") if isinstance(result, dict) else str(result)
+                            error = (
+                                result.get("error", "未知错误")
+                                if isinstance(result, dict)
+                                else str(result)
+                            )
                             print(f"   ❗ 错误: {error}")
 
                     # 收集生成的代码
@@ -351,7 +375,9 @@ class FullstackGeneratorRunner:
                             step_id=str(step),
                             success=success,
                             output=result,
-                            error=result.get("error") if isinstance(result, dict) else None,
+                            error=result.get("error")
+                            if isinstance(result, dict)
+                            else None,
                         )
                     )
 
@@ -368,19 +394,19 @@ class FullstackGeneratorRunner:
                         severity = data.get("severity", "warning")
                         message = data.get("message", "")
                         violations = data.get("violations", [])
-                        
+
                         icon = "🔴" if severity == "critical" else "🟡"
                         print(f"\n{icon} 一致性违规 [{severity}]:")
                         if message:
                             print(f"   📋 {message}")
-                        
+
                         if violations:
                             for v in violations:
                                 v_severity = v.get("severity", "warning")
                                 v_desc = v.get("description", "未知违规")
                                 v_suggestion = v.get("suggestion", "")
                                 v_checkpoint = v.get("checkpoint_id", "")
-                                
+
                                 print(f"   📍 检查点: {v_checkpoint}")
                                 print(f"   📝 问题: {v_desc}")
                                 if v_suggestion:
@@ -393,9 +419,13 @@ class FullstackGeneratorRunner:
                     self.collected_trace = data.get("trace")
                     self.collected_trace_full = data.get("trace_full")  # 完整版追踪数据
                     self.collected_checkpoints = data.get("checkpoints")  # 检查点数据
-                    self.collected_working_memory = data.get("working_memory")  # 工作记忆数据
-                    self.collected_violations = data.get("consistency_violations")  # 一致性违规数据
-                    
+                    self.collected_working_memory = data.get(
+                        "working_memory"
+                    )  # 工作记忆数据
+                    self.collected_violations = data.get(
+                        "consistency_violations"
+                    )  # 一致性违规数据
+
                     if verbose:
                         print("\n" + "=" * 70)
                         if execution_success:
@@ -405,27 +435,48 @@ class FullstackGeneratorRunner:
                                 trace_summary = self.collected_trace.get("summary", {})
                                 llm_calls = trace_summary.get("llm_calls", {})
                                 binding_ops = trace_summary.get("binding_ops", {})
-                                
-                                print(f"   🔍 追踪ID: {self.collected_trace.get('trace_id', 'N/A')}")
-                                print(f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}")
-                                
+
+                                print(
+                                    f"   🔍 追踪ID: {self.collected_trace.get('trace_id', 'N/A')}"
+                                )
+                                print(
+                                    f"   🤖 LLM调用: {llm_calls.get('count', 0)} 次, Token: {llm_calls.get('total_tokens', 0):,}"
+                                )
+
                                 # 显示绑定统计
-                                if binding_ops and binding_ops.get("total_bindings", 0) > 0:
+                                if (
+                                    binding_ops
+                                    and binding_ops.get("total_bindings", 0) > 0
+                                ):
                                     print(f"\n   🔗 参数绑定统计:")
-                                    print(f"      • 绑定规划: {binding_ops.get('plan_creates', 0)} 次")
-                                    print(f"      • 绑定解析: {binding_ops.get('resolves', 0)} 次")
-                                    print(f"      • LLM Fallback: {binding_ops.get('fallbacks', 0)} 次")
-                                    print(f"      • 总绑定数: {binding_ops.get('total_bindings', 0)}")
-                                    print(f"      • 成功解析: {binding_ops.get('resolved_bindings', 0)}")
-                                    print(f"      • 需要 Fallback: {binding_ops.get('fallback_bindings', 0)}")
-                                    
+                                    print(
+                                        f"      • 绑定规划: {binding_ops.get('plan_creates', 0)} 次"
+                                    )
+                                    print(
+                                        f"      • 绑定解析: {binding_ops.get('resolves', 0)} 次"
+                                    )
+                                    print(
+                                        f"      • LLM Fallback: {binding_ops.get('fallbacks', 0)} 次"
+                                    )
+                                    print(
+                                        f"      • 总绑定数: {binding_ops.get('total_bindings', 0)}"
+                                    )
+                                    print(
+                                        f"      • 成功解析: {binding_ops.get('resolved_bindings', 0)}"
+                                    )
+                                    print(
+                                        f"      • 需要 Fallback: {binding_ops.get('fallback_bindings', 0)}"
+                                    )
+
                                     # 计算绑定成功率
                                     total = binding_ops.get("total_bindings", 0)
                                     resolved = binding_ops.get("resolved_bindings", 0)
                                     if total > 0:
                                         success_rate = resolved / total * 100
-                                        print(f"      • 绑定成功率: {success_rate:.1f}%")
-                                
+                                        print(
+                                            f"      • 绑定成功率: {success_rate:.1f}%"
+                                        )
+
                                 # 显示按目的分类的统计
                                 by_purpose = llm_calls.get("by_purpose", {})
                                 if by_purpose:
@@ -445,7 +496,9 @@ class FullstackGeneratorRunner:
                                     }
                                     for purpose, stats in by_purpose.items():
                                         name = purpose_names.get(purpose, purpose)
-                                        print(f"      - {name}: {stats.get('count', 0)} 次, {stats.get('tokens', 0):,} tokens")
+                                        print(
+                                            f"      - {name}: {stats.get('count', 0)} 次, {stats.get('tokens', 0):,} tokens"
+                                        )
                         else:
                             print(f"❌ 项目生成失败: {data.get('message', '')}")
                         print("=" * 70)
@@ -482,7 +535,7 @@ class FullstackGeneratorRunner:
 
     def _print_step_result(self, tool_name: str, result: Dict[str, Any]) -> None:
         """打印步骤执行结果的详细信息"""
-        
+
         if tool_name == "init_project":
             print(f"   📁 项目目录: {result.get('project_dir', 'N/A')}")
             files = result.get("created_files", [])

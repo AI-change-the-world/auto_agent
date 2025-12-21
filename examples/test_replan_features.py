@@ -417,7 +417,9 @@ def test_consistency_checker():
     # 测试持久化
     data = checker.to_dict()
     checker2 = GlobalConsistencyChecker.from_dict(data)
-    print(f"\n✅ 持久化测试: 恢复了 {len(checker2.checkpoints)} 个检查点, {len(checker2.violations)} 个违规")
+    print(
+        f"\n✅ 持久化测试: 恢复了 {len(checker2.checkpoints)} 个检查点, {len(checker2.violations)} 个违规"
+    )
 
     return True
 
@@ -499,14 +501,20 @@ def test_tool_post_policy():
     print("\n✅ ToolPostPolicy 创建成功:")
     print(f"   validation.on_fail: {post_policy.validation.on_fail}")
     print(f"   post_success.high_impact: {post_policy.post_success.high_impact}")
-    print(f"   result_handling.checkpoint_type: {post_policy.result_handling.checkpoint_type}")
+    print(
+        f"   result_handling.checkpoint_type: {post_policy.result_handling.checkpoint_type}"
+    )
 
     # 测试辅助方法
     print("\n✅ 辅助方法测试:")
     print(f"   is_high_impact(): {post_policy.is_high_impact()}")
     print(f"   should_check_consistency(): {post_policy.should_check_consistency()}")
-    print(f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}")
-    print(f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}")
+    print(
+        f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}"
+    )
+    print(
+        f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}"
+    )
 
     # 测试 2: 从旧字段构造（兼容性）
     old_replan_policy = ToolReplanPolicy(
@@ -547,10 +555,10 @@ def test_tool_post_policy():
     )
 
     print("\n✅ ToolDefinition.get_effective_post_policy():")
-    
+
     new_effective = tool_with_new.get_effective_post_policy()
     print(f"   新工具 - is_high_impact: {new_effective.is_high_impact()}")
-    
+
     old_effective = tool_with_old.get_effective_post_policy()
     print(f"   旧工具 - is_high_impact: {old_effective.is_high_impact()}")
 
@@ -568,7 +576,12 @@ def test_incremental_replan_structure():
     print("测试 10: 增量重规划数据结构")
     print("=" * 60)
 
-    from auto_agent.models import ExecutionPlan, ExecutionStrategy, PlanStep, SubTaskResult
+    from auto_agent.models import (
+        ExecutionPlan,
+        ExecutionStrategy,
+        PlanStep,
+        SubTaskResult,
+    )
 
     # 创建一个模拟的执行计划
     plan = ExecutionPlan(
@@ -664,7 +677,9 @@ async def main():
 
     # 阶段二测试：工作记忆
     results.append(("跨步骤工作记忆", test_working_memory()))
-    results.append(("ExecutionContext 集成", await test_execution_context_integration()))
+    results.append(
+        ("ExecutionContext 集成", await test_execution_context_integration())
+    )
 
     # 阶段三测试：一致性检查器
     results.append(("全局一致性检查器", test_consistency_checker()))

@@ -37,20 +37,20 @@ async def reflect(analysis: str, depth: str = "medium") -> Dict[str, Any]:
     """
     对分析结果进行批判性反思，使用 LLM 发现逻辑问题、潜在偏见和缺失视角。
     这是确保研究质量的关键步骤。
-    
+
     Args:
         analysis: 分析结果 JSON 字符串（从 analyze_content 获取）
         depth: 反思深度 - shallow(浅层), medium(中等), deep(深入)
-    
+
     Returns:
         包含 logical_issues, potential_biases, confidence_assessment 等的反思结果
     """
     from examples.langchain_compare.tools import _llm_client
-    
+
     try:
         # 解析输入
         analysis_data = _parse_json_input(analysis)
-        
+
         depth_instructions = {
             "shallow": "进行快速的逻辑检查和表面问题发现",
             "medium": "进行中等深度的批判性分析，检查论证逻辑和潜在偏见",
@@ -111,16 +111,16 @@ async def polish_text(text: str, style: str = "professional") -> Dict[str, Any]:
     """
     对文本进行语言润色，使用 LLM 提升表达的专业性、清晰度和可读性。
     通常用于润色最终报告。
-    
+
     Args:
         text: 待润色的文本
         style: 目标风格 - academic(学术), professional(专业), casual(通俗)
-    
+
     Returns:
         包含 polished_text 的结果
     """
     from examples.langchain_compare.tools import _llm_client
-    
+
     if not text:
         return {"success": False, "error": "没有待润色的文本"}
 
@@ -131,7 +131,9 @@ async def polish_text(text: str, style: str = "professional") -> Dict[str, Any]:
             "casual": "使用通俗易懂的风格，避免过多术语",
         }
 
-        style_instruction = style_instructions.get(style, style_instructions["professional"])
+        style_instruction = style_instructions.get(
+            style, style_instructions["professional"]
+        )
 
         prompt = f"""请对以下文本进行语言润色。
 
@@ -160,38 +162,44 @@ async def generate_report(
     analysis: str,
     topic: str,
     reflection: Optional[str] = None,
-    format: str = "standard"
+    format: str = "standard",
 ) -> Dict[str, Any]:
     """
     基于分析结果和反思意见，使用 LLM 生成结构化的研究报告。
     这是研究流程的最终输出步骤。
-    
+
     Args:
         analysis: 内容分析结果 JSON 字符串
         topic: 研究主题
         reflection: 反思结果 JSON 字符串（可选）
         format: 报告格式 - brief(简报), standard(标准), detailed(详细)
-    
+
     Returns:
         包含 report 和 word_count 的结果
     """
     from examples.langchain_compare.tools import _llm_client
-    
+
     try:
         # 解析输入
         analysis_data = _parse_json_input(analysis)
         reflection_data = _parse_json_input(reflection) if reflection else None
-        
+
         format_instructions = {
             "brief": "生成简明扼要的研究简报（500-800字）",
             "standard": "生成标准研究报告（1000-1500字）",
             "detailed": "生成详细研究报告（2000字以上）",
         }
 
-        format_instruction = format_instructions.get(format, format_instructions["standard"])
+        format_instruction = format_instructions.get(
+            format, format_instructions["standard"]
+        )
 
         analysis_text = json.dumps(analysis_data, ensure_ascii=False, indent=2)
-        reflection_text = json.dumps(reflection_data, ensure_ascii=False, indent=2) if reflection_data else "无"
+        reflection_text = (
+            json.dumps(reflection_data, ensure_ascii=False, indent=2)
+            if reflection_data
+            else "无"
+        )
 
         prompt = f"""请基于以下分析结果和反思意见，生成一份专业的研究报告。
 
@@ -230,5 +238,6 @@ async def generate_report(
 
 def get_all_tools():
     """获取所有工具列表"""
-    from examples.langchain_compare.tools import read_materials, analyze_content
+    from examples.langchain_compare.tools import analyze_content, read_materials
+
     return [read_materials, analyze_content, reflect, polish_text, generate_report]

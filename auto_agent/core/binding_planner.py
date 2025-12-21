@@ -90,11 +90,12 @@ class BindingPlanner:
             BindingPlan: 参数绑定计划
         """
         import time
+
         from auto_agent.tracing import (
-            start_span,
-            trace_llm_call,
-            trace_binding_event,
             BindingAction,
+            start_span,
+            trace_binding_event,
+            trace_llm_call,
         )
 
         start_time = time.time()
@@ -155,7 +156,8 @@ class BindingPlanner:
                 # 统计绑定结果
                 total_bindings = sum(len(s.bindings) for s in result.steps)
                 high_confidence = sum(
-                    1 for s in result.steps
+                    1
+                    for s in result.steps
                     for b in s.bindings.values()
                     if b.confidence >= self.confidence_threshold
                 )
@@ -167,16 +169,20 @@ class BindingPlanner:
                 for step in result.steps:
                     for param_name, binding in step.bindings.items():
                         source_type = binding.source_type.value
-                        source_type_stats[source_type] = source_type_stats.get(source_type, 0) + 1
-                        binding_details.append({
-                            "step_id": step.step_id,
-                            "tool": step.tool,
-                            "param": param_name,
-                            "source": binding.source,
-                            "source_type": source_type,
-                            "confidence": binding.confidence,
-                            "reasoning": binding.reasoning,
-                        })
+                        source_type_stats[source_type] = (
+                            source_type_stats.get(source_type, 0) + 1
+                        )
+                        binding_details.append(
+                            {
+                                "step_id": step.step_id,
+                                "tool": step.tool,
+                                "param": param_name,
+                                "source": binding.source,
+                                "source_type": source_type,
+                                "confidence": binding.confidence,
+                                "reasoning": binding.reasoning,
+                            }
+                        )
 
                 # 记录绑定事件
                 duration_ms = (time.time() - start_time) * 1000
@@ -270,23 +276,30 @@ class BindingPlanner:
             # 收集参数信息
             params_info = []
             for p in tool_def.parameters:
-                params_info.append({
-                    "name": p.name,
-                    "type": p.type,
-                    "description": p.description,
-                    "required": p.required,
-                    "default": p.default,
-                })
+                params_info.append(
+                    {
+                        "name": p.name,
+                        "type": p.type,
+                        "description": p.description,
+                        "required": p.required,
+                        "default": p.default,
+                    }
+                )
 
-            steps_info.append({
-                "step_id": subtask.id,
-                "tool_name": subtask.tool,
-                "description": subtask.description,
-                "parameters": params_info,
-                "output_schema": tool_def.output_schema or {},
-                "read_fields": subtask.read_fields,
-                "write_fields": subtask.write_fields,
-            })
+            steps_info.append(
+                {
+                    "step_id": subtask.id,
+                    "tool_name": subtask.tool,
+                    "description": subtask.description,
+                    # 规划器（TaskPlanner）可能已经为这一步提供了显式参数（含默认值/固定值）
+                    # BindingPlanner 应优先认为这些参数“已确定”，避免重复绑定。
+                    "preset_parameters": subtask.parameters or {},
+                    "parameters": params_info,
+                    "output_schema": tool_def.output_schema or {},
+                    "read_fields": subtask.read_fields,
+                    "write_fields": subtask.write_fields,
+                }
+            )
 
         return steps_info
 
@@ -322,12 +335,26 @@ class BindingPlanner:
 4. "literal": 字面量值，需要在 default_value 中提供具体值
 5. "generated": 无法确定来源，需要运行时由 LLM 生成
 
+【默认值与 preset 参数规则（重要）】
+1. 每个参数在 steps_json 的 parameters 里可能带有 "default"（工具 schema 的默认值）
+2. 如果某一步的 preset_parameters 已经包含某个参数的值，表示该参数已经确定：
+   - 你应该 **不要** 在 bindings 中返回这个参数（避免重复设置）
+3. 如果参数没有可靠来源，但工具 schema 给了 default，你可以选择：
+   - source_type="generated"，fallback="use_default"，default_value=<schema default>
+4. 若参数就是固定字面量（例如 limit=10），使用：
+   - source_type="literal"，default_value=具体值，fallback="use_default"
+
 【置信度评估】
 - 1.0: 完全确定（如用户明确提供、前序步骤明确输出）
 - 0.8-0.9: 高度确定（语义匹配度高）
 - 0.5-0.7: 中等确定（需要推理）
 - 0.3-0.5: 低确定性（可能需要 fallback）
 - 0.0-0.3: 非常不确定（建议 fallback）
+
+【fallback 策略】
+- "llm_infer": 默认策略，运行时让 LLM 推理参数
+- "use_default": 使用 default_value（或工具 schema default）作为回退
+- "error": 无法构造时直接报错（仅在强约束场景使用）
 
 【分析要点】
 1. 第一个步骤的参数通常来自 user_input 或 literal
@@ -348,6 +375,7 @@ class BindingPlanner:
                     "source": "来源路径",
                     "source_type": "user_input|step_output|state|literal|generated",
                     "confidence": 0.0-1.0,
+                    "fallback": "llm_infer|use_default|error",
                     "default_value": null,
                     "reasoning": "简短说明为什么这样绑定"
                 }}
@@ -416,24 +444,81 @@ class BindingPlanner:
                     source_type_str, BindingSourceType.GENERATED
                 )
 
+                # 映射 fallback（兼容旧返回：缺省 llm_infer）
+                fallback_str = (param_binding.get("fallback") or "llm_infer").lower()
+                fallback_map = {
+                    "llm_infer": BindingFallbackPolicy.LLM_INFER,
+                    "use_default": BindingFallbackPolicy.USE_DEFAULT,
+                    "error": BindingFallbackPolicy.ERROR,
+                }
+                fallback = fallback_map.get(
+                    fallback_str, BindingFallbackPolicy.LLM_INFER
+                )
+
                 bindings[param_name] = ParameterBinding(
                     source=param_binding.get("source", ""),
                     source_type=source_type,
                     confidence=param_binding.get("confidence", 0.5),
-                    fallback=BindingFallbackPolicy.LLM_INFER,
+                    fallback=fallback,
                     default_value=param_binding.get("default_value"),
                     reasoning=param_binding.get("reasoning"),
                 )
 
-            steps.append(StepBindings(
-                step_id=step_id,
-                tool=tool,
-                bindings=bindings,
-            ))
+            steps.append(
+                StepBindings(
+                    step_id=step_id,
+                    tool=tool,
+                    bindings=bindings,
+                )
+            )
 
-        return BindingPlan(
+        plan = BindingPlan(
             steps=steps,
             confidence_threshold=self.confidence_threshold,
             reasoning=result.get("reasoning", ""),
             created_at=datetime.now().isoformat(),
         )
+        # 注入工具 schema 默认值，确保 default_value 在 binding_plan 中可用
+        self._enrich_binding_plan_with_tool_defaults(plan, execution_plan)
+        return plan
+
+    def _enrich_binding_plan_with_tool_defaults(
+        self,
+        binding_plan: BindingPlan,
+        execution_plan: ExecutionPlan,
+    ) -> None:
+        """
+        用工具 schema 的默认值补齐 binding_plan 中每个参数的 default_value。
+
+        目的：
+        - 避免 LLM 未输出 default_value 时丢失工具默认值
+        - 为运行时 fallback（USE_DEFAULT）提供稳定数据
+        """
+        # step_id -> tool_name
+        step_tool_map = {s.id: s.tool for s in execution_plan.subtasks if s.tool}
+
+        for step in binding_plan.steps:
+            tool_name = step.tool or step_tool_map.get(step.step_id)
+            if not tool_name:
+                continue
+
+            tool = self.tool_registry.get_tool(tool_name)
+            if not tool:
+                continue
+
+            tool_def: ToolDefinition = tool.definition
+            default_map = {p.name: p.default for p in tool_def.parameters}
+
+            for param_name, binding in step.bindings.items():
+                tool_default = default_map.get(param_name)
+                # 1) 无论 LLM 如何绑定，都可把 tool default 写入 default_value，便于后续 fallback
+                if binding.default_value is None and tool_default is not None:
+                    binding.default_value = tool_default
+
+                # 2) 对 GENERATED 类型，如果工具有默认值，优先使用 USE_DEFAULT 以减少运行时 LLM
+                if (
+                    binding.source_type == BindingSourceType.GENERATED
+                    and binding.fallback == BindingFallbackPolicy.LLM_INFER
+                    and tool_default is not None
+                ):
+                    binding.fallback = BindingFallbackPolicy.USE_DEFAULT

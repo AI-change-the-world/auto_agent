@@ -133,7 +133,11 @@ async def test_consistency_checker_in_context():
         key_elements={
             "endpoints": [
                 {"method": "GET", "path": "/api/users/{id}", "params": {"id": "int"}},
-                {"method": "POST", "path": "/api/users", "body": {"name": "str", "email": "str"}},
+                {
+                    "method": "POST",
+                    "path": "/api/users",
+                    "body": {"name": "str", "email": "str"},
+                },
             ],
             "models": {
                 "User": {"id": "int", "name": "str", "email": "str"},
@@ -255,7 +259,9 @@ async def test_tool_replan_policy():
         if policy.replan_condition:
             print(f"      replan_condition: {policy.replan_condition}")
         if policy.consistency_check_against:
-            print(f"      consistency_check_against: {policy.consistency_check_against}")
+            print(
+                f"      consistency_check_against: {policy.consistency_check_against}"
+            )
 
     return True
 
@@ -342,8 +348,12 @@ def test_unified_post_policy():
     print("\n✅ ToolPostPolicy 创建成功:")
     print(f"   is_high_impact(): {post_policy.is_high_impact()}")
     print(f"   should_check_consistency(): {post_policy.should_check_consistency()}")
-    print(f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}")
-    print(f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}")
+    print(
+        f"   should_register_checkpoint(): {post_policy.should_register_checkpoint()}"
+    )
+    print(
+        f"   should_extract_working_memory(): {post_policy.should_extract_working_memory()}"
+    )
 
     # 测试从旧字段构造
     old_policy = ToolReplanPolicy(high_impact=True, requires_consistency_check=True)
@@ -416,8 +426,12 @@ def test_func_tool_decorator():
         effective = defn.get_effective_post_policy()
         print(f"   is_high_impact(): {effective.is_high_impact()}")
         print(f"   should_check_consistency(): {effective.should_check_consistency()}")
-        print(f"   should_register_checkpoint(): {effective.should_register_checkpoint()}")
-        print(f"   checkpoint_type: {effective.result_handling.checkpoint_type if effective.result_handling else None}")
+        print(
+            f"   should_register_checkpoint(): {effective.should_register_checkpoint()}"
+        )
+        print(
+            f"   checkpoint_type: {effective.result_handling.checkpoint_type if effective.result_handling else None}"
+        )
 
     # 测试 2: 使用 replan_policy 参数（旧方式）
     @func_tool(
@@ -463,7 +477,9 @@ async def main():
     results = []
 
     results.append(("工作记忆在上下文中", await test_working_memory_in_context()))
-    results.append(("一致性检查器在上下文中", await test_consistency_checker_in_context()))
+    results.append(
+        ("一致性检查器在上下文中", await test_consistency_checker_in_context())
+    )
     results.append(("工具级 Replan 策略", await test_tool_replan_policy()))
     results.append(("执行策略选择", await test_execution_strategy()))
     results.append(("统一后处理策略", test_unified_post_policy()))

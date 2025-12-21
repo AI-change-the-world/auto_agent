@@ -30,18 +30,18 @@ async def read_materials(file_types: str = ".txt,.md") -> Dict[str, Any]:
     """
     读取研究素材目录下的所有文件，返回文件内容和 LLM 生成的摘要。
     这是研究的第一步，用于获取原始数据。
-    
+
     Args:
         file_types: 要读取的文件类型，用逗号分隔（如 .txt,.md）
-    
+
     Returns:
         包含 materials 列表和 total_files 数量的字典
     """
     global _llm_client, _materials_dir
-    
+
     if not _materials_dir:
         return {"success": False, "error": "素材目录未初始化"}
-    
+
     try:
         dir_path = Path(_materials_dir)
         if not dir_path.exists():
@@ -54,7 +54,7 @@ async def read_materials(file_types: str = ".txt,.md") -> Dict[str, Any]:
             if file_path.is_file() and file_path.suffix in extensions:
                 try:
                     content = file_path.read_text(encoding="utf-8")
-                    
+
                     # 使用 LLM 生成摘要
                     summary_prompt = f"""请为以下文件内容生成一个简洁的摘要（100字以内）。
 文件名: {file_path.name}
@@ -63,24 +63,31 @@ async def read_materials(file_types: str = ".txt,.md") -> Dict[str, Any]:
 {"..." if len(content) > 3000 else ""}
 
 请直接输出摘要，不要有任何前缀。"""
-                    
+
                     summary_response = await _llm_client.ainvoke(summary_prompt)
                     summary = summary_response.content.strip()
 
-                    materials.append({
-                        "filename": file_path.name,
-                        "content": content,
-                        "summary": summary,
-                        "word_count": len(content),
-                    })
+                    materials.append(
+                        {
+                            "filename": file_path.name,
+                            "content": content,
+                            "summary": summary,
+                            "word_count": len(content),
+                        }
+                    )
                 except Exception as e:
-                    materials.append({
-                        "filename": file_path.name,
-                        "error": str(e),
-                    })
+                    materials.append(
+                        {
+                            "filename": file_path.name,
+                            "error": str(e),
+                        }
+                    )
 
         if not materials:
-            return {"success": False, "error": f"目录中没有找到 {file_types} 格式的文件"}
+            return {
+                "success": False,
+                "error": f"目录中没有找到 {file_types} 格式的文件",
+            }
 
         return {
             "success": True,
@@ -110,21 +117,21 @@ async def analyze_content(materials: str, focus: str = "") -> Dict[str, Any]:
     """
     分析研究素材内容，使用 LLM 提取主题、论点、关键数据和知识缺口。
     这是深度研究的核心分析步骤。
-    
+
     Args:
         materials: 素材列表 JSON 字符串（从 read_materials 获取）
         focus: 研究重点/关注方向（可选）
-    
+
     Returns:
         包含 main_themes, key_arguments, overall_insight 等的分析结果
     """
     global _llm_client
-    
+
     # 解析输入
     materials_data = _parse_json_input(materials)
     if isinstance(materials_data, dict):
         materials_data = materials_data.get("materials", [])
-    
+
     if not materials_data:
         return {"success": False, "error": "没有可分析的素材"}
 
@@ -178,6 +185,10 @@ async def analyze_content(materials: str, focus: str = "") -> Dict[str, Any]:
             }
 
     except json.JSONDecodeError:
-        return {"success": True, "raw_analysis": response_text, "parse_error": "JSON解析失败"}
+        return {
+            "success": True,
+            "raw_analysis": response_text,
+            "parse_error": "JSON解析失败",
+        }
     except Exception as e:
         return {"success": False, "error": str(e)}

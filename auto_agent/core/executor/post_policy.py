@@ -6,25 +6,20 @@
 
 import json
 import re
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from auto_agent.models import (
-    ExecutionStrategy,
-    PlanStep,
-    SubTaskResult,
-    ToolPostPolicy,
-)
+from auto_agent.models import ExecutionStrategy, PlanStep, SubTaskResult, ToolPostPolicy
 
 if TYPE_CHECKING:
-    from auto_agent.llm.client import LLMClient
     from auto_agent.core.context import ExecutionContext
+    from auto_agent.llm.client import LLMClient
     from auto_agent.tools.registry import ToolRegistry
 
 
 class PostPolicyManager:
     """
     后处理策略管理器
-    
+
     负责：
     1. 应用统一的后处理策略
     2. 提取工作记忆
@@ -80,7 +75,11 @@ class PostPolicyManager:
             return post_result
 
         # 获取工具的后处理策略
-        tool = self.tool_registry.get_tool(step.tool) if self.tool_registry and step.tool else None
+        tool = (
+            self.tool_registry.get_tool(step.tool)
+            if self.tool_registry and step.tool
+            else None
+        )
         post_policy: Optional[ToolPostPolicy] = None
 
         if tool and hasattr(tool, "definition"):

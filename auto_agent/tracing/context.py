@@ -12,6 +12,8 @@ from contextvars import ContextVar
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
 from auto_agent.tracing.models import (
+    BindingAction,
+    BindingEvent,
     EventType,
     FlowAction,
     FlowEvent,
@@ -19,8 +21,6 @@ from auto_agent.tracing.models import (
     LLMPurpose,
     MemoryAction,
     MemoryEvent,
-    BindingEvent,
-    BindingAction,
     ToolCallEvent,
     TraceContext,
     TraceEvent,
@@ -37,18 +37,18 @@ F = TypeVar("F", bound=Callable[..., Any])
 class Tracer:
     """
     追踪器
-    
+
     用于管理追踪上下文的生命周期
-    
+
     使用示例：
         with Tracer.start("user_query", user_id="u1") as trace:
             # 执行逻辑
             pass
-        
+
         # 获取结果
         report = trace.to_dict()
     """
-    
+
     @staticmethod
     def start(
         query: str = "",
@@ -57,12 +57,12 @@ class Tracer:
     ) -> "TracerContextManager":
         """开始追踪"""
         return TracerContextManager(query, user_id, metadata)
-    
+
     @staticmethod
     def get_current() -> Optional[TraceContext]:
         """获取当前追踪上下文"""
         return _trace_ctx.get()
-    
+
     @staticmethod
     def set_current(ctx: Optional[TraceContext]):
         """设置当前追踪上下文"""
@@ -71,7 +71,7 @@ class Tracer:
 
 class TracerContextManager:
     """追踪上下文管理器"""
-    
+
     def __init__(
         self,
         query: str = "",
@@ -83,7 +83,7 @@ class TracerContextManager:
         self.metadata = metadata or {}
         self.trace: Optional[TraceContext] = None
         self._token = None
-    
+
     def __enter__(self) -> TraceContext:
         self.trace = TraceContext(
             query=self.query,
@@ -92,51 +92,54 @@ class TracerContextManager:
         )
         self._token = _trace_ctx.set(self.trace)
         return self.trace
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.trace:
             self.trace.end()
         if self._token is not None:
             _trace_ctx.reset(self._token)
         return False
-    
+
     async def __aenter__(self) -> TraceContext:
         return self.__enter__()
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return self.__exit__(exc_type, exc_val, exc_tb)
 
 
 class SpanContextManager:
     """Span 上下文管理器"""
-    
-    def __init__(self, name: str, span_type: str = "", metadata: Optional[Dict[str, Any]] = None):
+
+    def __init__(
+        self, name: str, span_type: str = "", metadata: Optional[Dict[str, Any]] = None
+    ):
         self.name = name
         self.span_type = span_type
         self.metadata = metadata or {}
         self.span: Optional[TraceSpan] = None
-    
+
     def __enter__(self) -> Optional[TraceSpan]:
         trace = get_current_trace()
         if trace:
             self.span = trace.start_span(self.name, self.span_type)
             self.span.metadata.update(self.metadata)
         return self.span
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         trace = get_current_trace()
         if trace and self.span:
             trace.end_span()
         return False
-    
+
     async def __aenter__(self) -> Optional[TraceSpan]:
         return self.__enter__()
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return self.__exit__(exc_type, exc_val, exc_tb)
 
 
 # ==================== 便捷函数 ====================
+
 
 def get_current_trace() -> Optional[TraceContext]:
     """获取当前追踪上下文"""
@@ -156,6 +159,7 @@ def start_span(name: str, span_type: str = "", **metadata) -> SpanContextManager
 
 # ==================== 事件记录函数 ====================
 
+
 def trace_llm_call(
     purpose: Union[LLMPurpose, str],
     model: str = "",
@@ -173,19 +177,19 @@ def trace_llm_call(
 ):
     """
     记录 LLM 调用事件
-    
+
     可以作为函数调用，也可以作为装饰器使用
     """
     trace = get_current_trace()
     if not trace:
         return
-    
+
     if isinstance(purpose, str):
         try:
             purpose = LLMPurpose(purpose)
         except ValueError:
             purpose = LLMPurpose.OTHER
-    
+
     event = LLMCallEvent(
         purpose=purpose,
         model=model,
@@ -218,7 +222,7 @@ def trace_tool_call(
     trace = get_current_trace()
     if not trace:
         return
-    
+
     event = ToolCallEvent(
         tool_name=tool_name,
         tool_description=tool_description,
@@ -245,13 +249,13 @@ def trace_flow_event(
     trace = get_current_trace()
     if not trace:
         return
-    
+
     if isinstance(action, str):
         try:
             action = FlowAction(action)
         except ValueError:
             action = FlowAction.FALLBACK
-    
+
     event = FlowEvent(
         action=action,
         reason=reason,
@@ -277,13 +281,13 @@ def trace_memory_event(
     trace = get_current_trace()
     if not trace:
         return
-    
+
     if isinstance(action, str):
         try:
             action = MemoryAction(action)
         except ValueError:
             action = MemoryAction.READ
-    
+
     event = MemoryEvent(
         action=action,
         memory_layer=memory_layer,
@@ -310,7 +314,7 @@ def trace_binding_event(
 ):
     """
     记录参数绑定事件
-    
+
     Args:
         action: 绑定动作类型 (plan_create, resolve, fallback)
         step_id: 步骤 ID
@@ -325,13 +329,13 @@ def trace_binding_event(
     trace = get_current_trace()
     if not trace:
         return
-    
+
     if isinstance(action, str):
         try:
             action = BindingAction(action)
         except ValueError:
             action = BindingAction.RESOLVE
-    
+
     event = BindingEvent(
         action=action,
         step_id=step_id,
@@ -349,23 +353,25 @@ def trace_binding_event(
 
 # ==================== 装饰器 ====================
 
+
 def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
     """
     LLM 调用追踪装饰器
-    
+
     自动记录 LLM 调用的 prompt、response、tokens、耗时
-    
+
     使用示例：
         @traced_llm(purpose=LLMPurpose.PARAM_BUILD)
         async def build_params(self, prompt: str) -> str:
             return await self.llm_client.chat(...)
-    
+
     注意：被装饰的函数需要返回包含以下字段的字典或对象：
         - response: str
         - prompt_tokens: int (可选)
         - response_tokens: int (可选)
         - total_tokens: int (可选)
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -373,7 +379,7 @@ def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
             result = None
             error = None
             success = True
-            
+
             try:
                 result = await func(*args, **kwargs)
                 return result
@@ -383,21 +389,23 @@ def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
                 raise
             finally:
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 # 尝试从结果中提取信息
                 response = ""
                 prompt_tokens = 0
                 response_tokens = 0
                 total_tokens = 0
-                
+
                 if isinstance(result, dict):
-                    response = result.get("response", result.get("content", str(result)))
+                    response = result.get(
+                        "response", result.get("content", str(result))
+                    )
                     prompt_tokens = result.get("prompt_tokens", 0)
                     response_tokens = result.get("response_tokens", 0)
                     total_tokens = result.get("total_tokens", 0)
                 elif isinstance(result, str):
                     response = result
-                
+
                 trace_llm_call(
                     purpose=purpose,
                     response=response,
@@ -408,14 +416,14 @@ def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
                     success=success,
                     error=error,
                 )
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             start_time = time.time()
             result = None
             error = None
             success = True
-            
+
             try:
                 result = func(*args, **kwargs)
                 return result
@@ -425,13 +433,15 @@ def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
                 raise
             finally:
                 duration_ms = (time.time() - start_time) * 1000
-                
+
                 response = ""
                 if isinstance(result, dict):
-                    response = result.get("response", result.get("content", str(result)))
+                    response = result.get(
+                        "response", result.get("content", str(result))
+                    )
                 elif isinstance(result, str):
                     response = result
-                
+
                 trace_llm_call(
                     purpose=purpose,
                     response=response,
@@ -439,35 +449,36 @@ def traced_llm(purpose: Union[LLMPurpose, str] = LLMPurpose.OTHER):
                     success=success,
                     error=error,
                 )
-        
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
         return sync_wrapper  # type: ignore
-    
+
     return decorator
 
 
 def traced_tool(tool_name: Optional[str] = None):
     """
     工具调用追踪装饰器
-    
+
     自动记录工具调用的参数、结果、耗时
-    
+
     使用示例：
         @traced_tool("search_documents")
         async def search(self, query: str) -> Dict:
             ...
     """
+
     def decorator(func: F) -> F:
         name = tool_name or func.__name__
-        
+
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             start_time = time.time()
             result = None
             error = None
             success = True
-            
+
             try:
                 result = await func(*args, **kwargs)
                 if isinstance(result, dict):
@@ -488,14 +499,14 @@ def traced_tool(tool_name: Optional[str] = None):
                     success=success,
                     error=error,
                 )
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             start_time = time.time()
             result = None
             error = None
             success = True
-            
+
             try:
                 result = func(*args, **kwargs)
                 if isinstance(result, dict):
@@ -516,38 +527,39 @@ def traced_tool(tool_name: Optional[str] = None):
                     success=success,
                     error=error,
                 )
-        
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
         return sync_wrapper  # type: ignore
-    
+
     return decorator
 
 
 def traced_span(name: str, span_type: str = ""):
     """
     Span 追踪装饰器
-    
+
     自动创建和管理 span 生命周期
-    
+
     使用示例：
         @traced_span("planning", span_type="planning")
         async def create_plan(self, query: str) -> ExecutionPlan:
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             with start_span(name, span_type):
                 return await func(*args, **kwargs)
-        
+
         @functools.wraps(func)
         def sync_wrapper(*args, **kwargs):
             with start_span(name, span_type):
                 return func(*args, **kwargs)
-        
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper  # type: ignore
         return sync_wrapper  # type: ignore
-    
+
     return decorator

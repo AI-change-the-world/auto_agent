@@ -18,6 +18,7 @@ AutoAgent 主类
 - Memory 系统由 ExecutionEngine 内部管理
 """
 
+import json
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from auto_agent.core.binding_planner import BindingPlanner
@@ -110,7 +111,9 @@ class AutoAgent:
             AgentResponse
         """
         # 确定是否启用参数绑定
-        use_binding = enable_binding if enable_binding is not None else self._enable_binding
+        use_binding = (
+            enable_binding if enable_binding is not None else self._enable_binding
+        )
 
         # Step 1: 规划
         plan = await self.planner.plan(
@@ -141,6 +144,9 @@ class AutoAgent:
                 # 绑定规划失败不影响执行
                 pass
 
+        if binding_plan:
+            print("binding_plan: \n", json.dumps(binding_plan.to_dict(), indent=4, ensure_ascii=False))
+
         # Step 2: 初始化状态
         state = self._initialize_state(query, template_id, plan.state_schema)
 
@@ -163,6 +169,7 @@ class AutoAgent:
             tool_executor=tool_executor,
             agent_info=agent_info,
             binding_plan=binding_plan,
+            binding_planner=self.binding_planner if use_binding else None,
         ):
             if event["event"] == "execution_complete":
                 final_state = event["data"]["state"]
@@ -209,7 +216,9 @@ class AutoAgent:
             - data: 事件数据
         """
         # 确定是否启用参数绑定
-        use_binding = enable_binding if enable_binding is not None else self._enable_binding
+        use_binding = (
+            enable_binding if enable_binding is not None else self._enable_binding
+        )
 
         # Step 1: 规划阶段
         yield {"event": "planning", "data": {"message": "正在规划执行步骤..."}}
@@ -252,6 +261,11 @@ class AutoAgent:
                     user_input=query,
                 )
 
+                if binding_plan:
+                    print(
+                        "binding_plan: \n", json.dumps(binding_plan.to_dict(), indent=4, ensure_ascii=False)
+                    )
+
                 if binding_plan and binding_plan.steps:
                     # 收集详细的绑定输出信息
                     bindings_summary = []
@@ -268,7 +282,7 @@ class AutoAgent:
                                 "confidence": binding.confidence,
                                 "reasoning": binding.reasoning,  # 添加推理说明
                                 "default_value": binding.default_value,  # 添加默认值
-                                "fallback_policy": binding.fallback_policy.value if binding.fallback_policy else "llm_infer",
+                                "fallback_policy": binding.fallback.value,
                             }
                         bindings_summary.append(step_summary)
 
@@ -303,6 +317,7 @@ class AutoAgent:
             except Exception as e:
                 # 绑定规划失败不影响执行，fallback 到原有逻辑
                 import traceback
+
                 yield {
                     "event": "binding_plan",
                     "data": {
@@ -335,7 +350,8 @@ class AutoAgent:
                 ],
                 "state_schema": plan.state_schema,
                 "warnings": plan.warnings,
-                "has_binding_plan": binding_plan is not None and len(binding_plan.steps) > 0,
+                "has_binding_plan": binding_plan is not None
+                and len(binding_plan.steps) > 0,
             },
         }
 
@@ -362,6 +378,7 @@ class AutoAgent:
             tool_executor=tool_executor,
             agent_info=agent_info,
             binding_plan=binding_plan,
+            binding_planner=self.binding_planner if use_binding else None,
         ):
             # 转发执行事件
             if event["event"] != "execution_complete":
@@ -369,7 +386,9 @@ class AutoAgent:
             else:
                 final_state = event["data"]["state"]
                 trace_data = event["data"].get("trace")  # 提取追踪数据（摘要版）
-                trace_data_full = event["data"].get("trace_full")  # 提取追踪数据（完整版）
+                trace_data_full = event["data"].get(
+                    "trace_full"
+                )  # 提取追踪数据（完整版）
                 execution_context = event["data"].get("context")  # 提取执行上下文
 
         # Step 4: 生成答案
@@ -390,36 +409,40 @@ class AutoAgent:
         checkpoints_data = None
         working_memory_data = None
         violations_data = None
-        
+
         if execution_context:
             # 提取一致性检查点
-            if hasattr(execution_context, 'consistency_checker'):
+            if hasattr(execution_context, "consistency_checker"):
                 checker = execution_context.consistency_checker
                 checkpoints_data = []
                 for step_id, cp in checker.checkpoints.items():
-                    checkpoints_data.append({
-                        "checkpoint_id": step_id,
-                        "step_id": cp.step_id,
-                        "checkpoint_type": cp.artifact_type,
-                        "description": cp.description,
-                        "key_elements": cp.key_elements,
-                        "constraints": cp.constraints_for_future,
-                    })
-                
+                    checkpoints_data.append(
+                        {
+                            "checkpoint_id": step_id,
+                            "step_id": cp.step_id,
+                            "checkpoint_type": cp.artifact_type,
+                            "description": cp.description,
+                            "key_elements": cp.key_elements,
+                            "constraints": cp.constraints_for_future,
+                        }
+                    )
+
                 # 提取违规记录
                 if checker.violations:
                     violations_data = []
                     for v in checker.violations:
-                        violations_data.append({
-                            "checkpoint_id": v.checkpoint_id,
-                            "current_step_id": v.current_step_id,
-                            "severity": v.severity,
-                            "description": v.description,
-                            "suggestion": v.suggestion,
-                        })
-            
+                        violations_data.append(
+                            {
+                                "checkpoint_id": v.checkpoint_id,
+                                "current_step_id": v.current_step_id,
+                                "severity": v.severity,
+                                "description": v.description,
+                                "suggestion": v.suggestion,
+                            }
+                        )
+
             # 提取工作记忆
-            if hasattr(execution_context, 'working_memory'):
+            if hasattr(execution_context, "working_memory"):
                 wm = execution_context.working_memory
                 working_memory_data = {
                     "decisions": [
@@ -444,7 +467,9 @@ class AutoAgent:
                         {
                             "name": name,
                             "type": iface.interface_type,
-                            "definition": str(iface.definition)[:200] if iface.definition else "",
+                            "definition": str(iface.definition)[:200]
+                            if iface.definition
+                            else "",
                             "step_id": iface.defined_by,
                         }
                         for name, iface in wm.interfaces.items()  # interfaces 是 dict
@@ -453,13 +478,15 @@ class AutoAgent:
                         {
                             "todo": t.todo,  # 使用 todo 而不是 description
                             "priority": t.priority,
-                            "status": "done" if t.completed else "pending",  # 使用 completed
+                            "status": "done"
+                            if t.completed
+                            else "pending",  # 使用 completed
                             "created_by": t.created_by,
                         }
                         for t in wm.todos
                     ],
                 }
-        
+
         yield {
             "event": "done",
             "data": {

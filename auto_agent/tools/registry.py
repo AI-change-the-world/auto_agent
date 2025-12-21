@@ -10,7 +10,12 @@
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from auto_agent.models import ToolDefinition, ToolParameter, ToolPostPolicy, ToolReplanPolicy
+from auto_agent.models import (
+    ToolDefinition,
+    ToolParameter,
+    ToolPostPolicy,
+    ToolReplanPolicy,
+)
 from auto_agent.tools.base import BaseTool
 
 

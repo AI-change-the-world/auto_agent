@@ -12,10 +12,10 @@ import asyncio
 import os
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
-from dataclasses import dataclass, field
 
 # 添加项目根目录到 path
 script_dir = Path(__file__).parent
@@ -27,56 +27,57 @@ if str(project_root) not in sys.path:
 @dataclass
 class TokenTracker:
     """Token 追踪器"""
+
     steps: List[Dict[str, Any]] = field(default_factory=list)
     cumulative_tokens: int = 0
-    
+
     def add_step(self, step_name: str, tokens: int):
         self.cumulative_tokens += tokens
-        self.steps.append({
-            "step": step_name,
-            "tokens": tokens,
-            "cumulative": self.cumulative_tokens,
-        })
+        self.steps.append(
+            {
+                "step": step_name,
+                "tokens": tokens,
+                "cumulative": self.cumulative_tokens,
+            }
+        )
         print(f"   📊 Token: +{tokens:,} | 累计: {self.cumulative_tokens:,}")
+
 
 # ==================== auto_agent 版本 ====================
 
+
 async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[str, Any]:
     """运行 auto_agent 版本"""
-    from auto_agent import (
-        AutoAgent,
-        OpenAIClient,
-        ToolRegistry,
-    )
-    
+    from auto_agent import AutoAgent, OpenAIClient, ToolRegistry
+
     # 导入工具（从 deep_research_demo）
     from examples.deep_research_demo import (
-        ReadMaterialsTool,
         AnalyzeContentTool,
-        ReflectTool,
-        PolishTextTool,
         GenerateReportTool,
+        PolishTextTool,
+        ReadMaterialsTool,
+        ReflectTool,
     )
-    
+
     print("\n" + "=" * 70)
     print("🔬 [auto_agent] Deep Research Agent")
     print("=" * 70)
-    
+
     start_time = time.time()
     tracker = TokenTracker()
-    
+
     # 初始化 LLM
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("OPENAI_MODEL", "deepseek-chat")
-    
+
     llm_client = OpenAIClient(
         api_key=api_key,
         base_url=base_url,
         model=model,
         timeout=120.0,
     )
-    
+
     # 注册工具
     registry = ToolRegistry()
     registry.register(ReadMaterialsTool(llm_client, materials_dir))
@@ -84,7 +85,7 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
     registry.register(ReflectTool(llm_client))
     registry.register(PolishTextTool(llm_client))
     registry.register(GenerateReportTool(llm_client))
-    
+
     # 创建 Agent
     agent = AutoAgent(
         llm_client=llm_client,
@@ -92,13 +93,13 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
         agent_name="Deep Research Agent",
         agent_description="深度研究智能体",
     )
-    
+
     # 执行
     final_report = ""
     trace_data = None
     iterations = 0
     last_cumulative = 0
-    
+
     try:
         async for event in agent.run_stream(
             query=user_query,
@@ -106,10 +107,10 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
         ):
             event_type = event.get("event")
             data = event.get("data", {})
-            
+
             if event_type == "stage_start":
                 print(f"   ▶️ Step {data.get('step')}: {data.get('name')}")
-            
+
             elif event_type == "stage_complete":
                 status = "✅" if data.get("success") else "❌"
                 # 从 trace 中获取当前累计 token
@@ -118,16 +119,16 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
                 if step_tokens > 0:
                     tracker.add_step(data.get("name", "unknown"), step_tokens)
                 print(f"   {status} 完成")
-            
+
             elif event_type == "answer":
                 final_report = data.get("answer", "")
-            
+
             elif event_type == "done":
                 iterations = data.get("iterations", 0)
                 trace_data = data.get("trace")
-        
+
         end_time = time.time()
-        
+
         # 提取统计
         llm_calls = 0
         total_tokens = 0
@@ -136,7 +137,7 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
             summary = trace_data.get("summary", {})
             llm_calls = summary.get("llm_calls", {}).get("count", 0)
             total_tokens = summary.get("llm_calls", {}).get("total_tokens", 0)
-            
+
             # 从 spans 提取每步 token
             spans = trace_data.get("spans", [])
             cumulative = 0
@@ -144,18 +145,22 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
                 span_tokens = span.get("total_tokens", 0)
                 if span_tokens > 0:
                     cumulative += span_tokens
-                    token_steps.append({
-                        "step": span.get("name", "unknown"),
-                        "tokens": span_tokens,
-                        "cumulative": cumulative,
-                    })
-        
+                    token_steps.append(
+                        {
+                            "step": span.get("name", "unknown"),
+                            "tokens": span_tokens,
+                            "cumulative": cumulative,
+                        }
+                    )
+
         # 打印 token 统计
         print(f"\n   📊 Token 消耗明细:")
         for step in token_steps:
-            print(f"      {step['step']}: +{step['tokens']:,} (累计: {step['cumulative']:,})")
+            print(
+                f"      {step['step']}: +{step['tokens']:,} (累计: {step['cumulative']:,})"
+            )
         print(f"   📊 总计: {total_tokens:,} tokens")
-        
+
         return {
             "success": True,
             "framework": "auto_agent",
@@ -166,10 +171,11 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
             "total_tokens": total_tokens,
             "token_steps": token_steps,
         }
-        
+
     except Exception as e:
         end_time = time.time()
         import traceback
+
         traceback.print_exc()
         return {
             "success": False,
@@ -183,48 +189,59 @@ async def run_auto_agent_version(user_query: str, materials_dir: str) -> Dict[st
 
 # ==================== LangChain 版本 ====================
 
+
 class LangChainTokenCallback:
     """LangChain Token 回调追踪器"""
-    
+
     def __init__(self):
         self.steps: List[Dict[str, Any]] = []
         self.cumulative_tokens = 0
         self.current_step = "init"
-    
+
     def on_llm_end(self, tokens: int, step_name: str = None):
         step = step_name or self.current_step
         self.cumulative_tokens += tokens
-        self.steps.append({
-            "step": step,
-            "tokens": tokens,
-            "cumulative": self.cumulative_tokens,
-        })
+        self.steps.append(
+            {
+                "step": step,
+                "tokens": tokens,
+                "cumulative": self.cumulative_tokens,
+            }
+        )
         print(f"   📊 Token: +{tokens:,} | 累计: {self.cumulative_tokens:,}")
 
 
 async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str, Any]:
     """运行 LangChain 版本"""
-    from langchain_openai import ChatOpenAI
-    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain.agents import AgentExecutor, create_tool_calling_agent
     from langchain_core.callbacks import BaseCallbackHandler
-    
-    from examples.langchain_compare.tools import init_tools, read_materials, analyze_content
-    from examples.langchain_compare.tools_part2 import reflect, polish_text, generate_report
-    
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_openai import ChatOpenAI
+
+    from examples.langchain_compare.tools import (
+        analyze_content,
+        init_tools,
+        read_materials,
+    )
+    from examples.langchain_compare.tools_part2 import (
+        generate_report,
+        polish_text,
+        reflect,
+    )
+
     print("\n" + "=" * 70)
     print("🔬 [LangChain] Deep Research Agent")
     print("=" * 70)
-    
+
     start_time = time.time()
     token_tracker = LangChainTokenCallback()
-    
+
     # 自定义回调处理器
     class TokenTrackingHandler(BaseCallbackHandler):
         def __init__(self, tracker: LangChainTokenCallback):
             self.tracker = tracker
             self.step_count = 0
-        
+
         def on_llm_end(self, response, **kwargs):
             # 尝试从 response 获取 token 使用量
             token_usage = getattr(response, "llm_output", {})
@@ -234,7 +251,7 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
                 if total > 0:
                     self.tracker.on_llm_end(total, f"llm_call_{self.step_count}")
                     self.step_count += 1
-            
+
             # 备用：从 generations 获取
             if hasattr(response, "generations") and response.generations:
                 for gen_list in response.generations:
@@ -243,23 +260,25 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
                             usage = gen.generation_info.get("token_usage", {})
                             total = usage.get("total_tokens", 0)
                             if total > 0:
-                                self.tracker.on_llm_end(total, f"llm_call_{self.step_count}")
+                                self.tracker.on_llm_end(
+                                    total, f"llm_call_{self.step_count}"
+                                )
                                 self.step_count += 1
-        
+
         def on_tool_start(self, serialized, input_str, **kwargs):
             tool_name = serialized.get("name", "unknown")
             print(f"   ▶️ 调用工具: {tool_name}")
-        
+
         def on_tool_end(self, output, **kwargs):
             print(f"   ✅ 工具完成")
-    
+
     callback_handler = TokenTrackingHandler(token_tracker)
-    
+
     # 初始化 LLM
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL", "https://api.deepseek.com/v1")
     model = os.getenv("OPENAI_MODEL", "deepseek-chat")
-    
+
     llm = ChatOpenAI(
         api_key=api_key,
         base_url=base_url,
@@ -268,11 +287,11 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
         timeout=120,
         callbacks=[callback_handler],
     )
-    
+
     # 初始化工具
     init_tools(llm, materials_dir)
     tools = [read_materials, analyze_content, reflect, polish_text, generate_report]
-    
+
     # 创建 Agent
     system_prompt = """你是一个专业的深度研究智能体。
 
@@ -285,12 +304,14 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
 
 请按顺序执行研究任务，确保每一步的输出传递给下一步。"""
 
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", system_prompt),
-        ("human", "{input}"),
-        MessagesPlaceholder(variable_name="agent_scratchpad"),
-    ])
-    
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ]
+    )
+
     agent = create_tool_calling_agent(llm, tools, prompt)
     agent_executor = AgentExecutor(
         agent=agent,
@@ -300,23 +321,25 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
         return_intermediate_steps=True,
         callbacks=[callback_handler],
     )
-    
+
     try:
         result = await agent_executor.ainvoke(
             {"input": user_query},
             config={"callbacks": [callback_handler]},
         )
-        
+
         end_time = time.time()
-        
+
         intermediate_steps = result.get("intermediate_steps", [])
-        
+
         # 打印 token 统计
         print(f"\n   📊 Token 消耗明细:")
         for step in token_tracker.steps:
-            print(f"      {step['step']}: +{step['tokens']:,} (累计: {step['cumulative']:,})")
+            print(
+                f"      {step['step']}: +{step['tokens']:,} (累计: {step['cumulative']:,})"
+            )
         print(f"   📊 总计: {token_tracker.cumulative_tokens:,} tokens")
-        
+
         return {
             "success": True,
             "framework": "langchain",
@@ -327,10 +350,11 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
             "total_tokens": token_tracker.cumulative_tokens,
             "token_steps": token_tracker.steps,
         }
-        
+
     except Exception as e:
         end_time = time.time()
         import traceback
+
         traceback.print_exc()
         return {
             "success": False,
@@ -343,15 +367,16 @@ async def run_langchain_version(user_query: str, materials_dir: str) -> Dict[str
 
 # ==================== 对比报告 ====================
 
+
 def generate_comparison_report(
     auto_agent_result: Dict[str, Any],
     langchain_result: Dict[str, Any],
     output_dir: Path,
 ):
     """生成对比报告"""
-    
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     # 生成 token 明细表格
     def format_token_steps(steps: List[Dict]) -> str:
         if not steps:
@@ -360,10 +385,10 @@ def generate_comparison_report(
         for s in steps:
             lines.append(f"| {s['step']} | {s['tokens']:,} | {s['cumulative']:,} |")
         return "\n".join(lines)
-    
+
     auto_token_table = format_token_steps(auto_agent_result.get("token_steps", []))
     lc_token_table = format_token_steps(langchain_result.get("token_steps", []))
-    
+
     report = f"""# 框架对比报告
 
 > 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -426,38 +451,39 @@ def generate_comparison_report(
 {langchain_result.get("output", langchain_result.get("error", "无输出"))[:2000]}
 ```
 """
-    
+
     output_file = output_dir / f"comparison_report_{timestamp}.md"
     output_file.write_text(report, encoding="utf-8")
-    
+
     print(f"\n📄 对比报告已保存: {output_file}")
     return output_file
 
 
 # ==================== 主函数 ====================
 
+
 async def main():
     """运行对比基准测试"""
-    
+
     print("=" * 70)
     print("🏁 框架对比基准测试")
     print("=" * 70)
-    
+
     # 检查环境
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         print("\n❌ 未设置 API Key")
         return
-    
+
     # 素材目录
     script_dir = Path(__file__).parent.parent
     materials_dir = str(script_dir / "research_materials")
-    
+
     if not Path(materials_dir).exists():
         print(f"\n❌ 素材目录不存在: {materials_dir}")
         print("请先运行 deep_research_demo.py 创建示例素材")
         return
-    
+
     # 用户查询
     user_query = """
     请帮我做一个关于"人工智能在医疗领域的应用与伦理挑战"的深度研究。
@@ -469,36 +495,46 @@ async def main():
     4. 生成研究报告
     5. 对报告进行润色
     """
-    
+
     # 运行 auto_agent 版本
     print("\n" + "=" * 70)
     print("📌 第一轮: 运行 auto_agent 版本")
     print("=" * 70)
     auto_agent_result = await run_auto_agent_version(user_query, materials_dir)
-    
+
     # 运行 LangChain 版本
     print("\n" + "=" * 70)
     print("📌 第二轮: 运行 LangChain 版本")
     print("=" * 70)
     langchain_result = await run_langchain_version(user_query, materials_dir)
-    
+
     # 生成对比报告
     output_dir = script_dir / "output"
     output_dir.mkdir(exist_ok=True)
-    
+
     generate_comparison_report(auto_agent_result, langchain_result, output_dir)
-    
+
     # 打印摘要
     print("\n" + "=" * 70)
     print("📊 对比摘要")
     print("=" * 70)
     print(f"\n{'指标':<20} {'auto_agent':<20} {'LangChain':<20}")
     print("-" * 60)
-    print(f"{'执行状态':<20} {'✅ 成功' if auto_agent_result.get('success') else '❌ 失败':<20} {'✅ 成功' if langchain_result.get('success') else '❌ 失败':<20}")
-    print(f"{'耗时(ms)':<20} {auto_agent_result.get('duration_ms', 0):<20.1f} {langchain_result.get('duration_ms', 0):<20.1f}")
-    print(f"{'执行步骤':<20} {auto_agent_result.get('iterations', 0):<20} {langchain_result.get('iterations', 0):<20}")
-    print(f"{'LLM调用':<20} {auto_agent_result.get('llm_calls', 0):<20} {langchain_result.get('llm_calls', 0):<20}")
-    print(f"{'Token消耗':<20} {auto_agent_result.get('total_tokens', 0):<20,} {langchain_result.get('total_tokens', 0):<20,}")
+    print(
+        f"{'执行状态':<20} {'✅ 成功' if auto_agent_result.get('success') else '❌ 失败':<20} {'✅ 成功' if langchain_result.get('success') else '❌ 失败':<20}"
+    )
+    print(
+        f"{'耗时(ms)':<20} {auto_agent_result.get('duration_ms', 0):<20.1f} {langchain_result.get('duration_ms', 0):<20.1f}"
+    )
+    print(
+        f"{'执行步骤':<20} {auto_agent_result.get('iterations', 0):<20} {langchain_result.get('iterations', 0):<20}"
+    )
+    print(
+        f"{'LLM调用':<20} {auto_agent_result.get('llm_calls', 0):<20} {langchain_result.get('llm_calls', 0):<20}"
+    )
+    print(
+        f"{'Token消耗':<20} {auto_agent_result.get('total_tokens', 0):<20,} {langchain_result.get('total_tokens', 0):<20,}"
+    )
 
 
 if __name__ == "__main__":

@@ -8,8 +8,9 @@ import json
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from auto_agent.core.executor.state import compress_state_for_llm
 from auto_agent.models import (
     ExecutionPlan,
     ExecutionStrategy,
@@ -17,16 +18,16 @@ from auto_agent.models import (
     SubTaskResult,
     ToolReplanPolicy,
 )
-from auto_agent.core.executor.state import compress_state_for_llm
 
 if TYPE_CHECKING:
-    from auto_agent.llm.client import LLMClient
     from auto_agent.core.context import ExecutionContext
+    from auto_agent.llm.client import LLMClient
     from auto_agent.tools.registry import ToolRegistry
 
 
 class PatternType(Enum):
     """执行模式类型"""
+
     CIRCULAR_DEPENDENCY = "circular_dependency"
     REPEATED_FAILURE = "repeated_failure"
     INEFFICIENT_SEQUENCE = "inefficient_sequence"
@@ -36,6 +37,7 @@ class PatternType(Enum):
 @dataclass
 class ExecutionPattern:
     """检测到的执行模式"""
+
     pattern_type: PatternType
     description: str
     frequency: int
@@ -46,7 +48,7 @@ class ExecutionPattern:
 class ReplanManager:
     """
     重规划管理器
-    
+
     负责：
     1. 执行模式检测
     2. 判断是否需要重规划
@@ -87,20 +89,26 @@ class ReplanManager:
             return patterns
 
         # 1. 检测重复失败模式
-        recent_results = execution_history[-5:] if len(execution_history) >= 5 else execution_history
+        recent_results = (
+            execution_history[-5:] if len(execution_history) >= 5 else execution_history
+        )
         recent_failures = [r for r in recent_results if not r.success]
 
         if len(recent_failures) >= 3:
             success_count = len([r for r in recent_results if r.success])
-            success_rate = success_count / len(recent_results) if recent_results else 0.0
+            success_rate = (
+                success_count / len(recent_results) if recent_results else 0.0
+            )
 
-            patterns.append(ExecutionPattern(
-                pattern_type=PatternType.REPEATED_FAILURE,
-                description=f"连续多次执行失败：最近 {len(recent_results)} 次执行中有 {len(recent_failures)} 次失败",
-                frequency=len(recent_failures),
-                success_rate=success_rate,
-                suggested_optimization="建议检查工具配置或参数，考虑使用替代工具或重新规划",
-            ))
+            patterns.append(
+                ExecutionPattern(
+                    pattern_type=PatternType.REPEATED_FAILURE,
+                    description=f"连续多次执行失败：最近 {len(recent_results)} 次执行中有 {len(recent_failures)} 次失败",
+                    frequency=len(recent_failures),
+                    success_rate=success_rate,
+                    suggested_optimization="建议检查工具配置或参数，考虑使用替代工具或重新规划",
+                )
+            )
 
         # 2. 检测循环依赖
         step_counts: Dict[str, int] = {}
@@ -112,15 +120,19 @@ class ReplanManager:
             if count > 3:
                 step_results = [r for r in execution_history if r.step_id == step_id]
                 step_success_count = len([r for r in step_results if r.success])
-                step_success_rate = step_success_count / len(step_results) if step_results else 0.0
+                step_success_rate = (
+                    step_success_count / len(step_results) if step_results else 0.0
+                )
 
-                patterns.append(ExecutionPattern(
-                    pattern_type=PatternType.CIRCULAR_DEPENDENCY,
-                    description=f"步骤 {step_id} 重复执行 {count} 次，可能存在循环依赖",
-                    frequency=count,
-                    success_rate=step_success_rate,
-                    suggested_optimization="建议检查步骤依赖关系，避免循环执行",
-                ))
+                patterns.append(
+                    ExecutionPattern(
+                        pattern_type=PatternType.CIRCULAR_DEPENDENCY,
+                        description=f"步骤 {step_id} 重复执行 {count} 次，可能存在循环依赖",
+                        frequency=count,
+                        success_rate=step_success_rate,
+                        suggested_optimization="建议检查步骤依赖关系，避免循环执行",
+                    )
+                )
 
         return patterns
 
@@ -148,7 +160,11 @@ class ReplanManager:
             (should_replan, reason): 是否需要 replan 及原因
         """
         # 获取工具级策略
-        tool = self.tool_registry.get_tool(step.tool) if self.tool_registry and step.tool else None
+        tool = (
+            self.tool_registry.get_tool(step.tool)
+            if self.tool_registry and step.tool
+            else None
+        )
         policy: Optional[ToolReplanPolicy] = None
         if tool and hasattr(tool, "definition") and tool.definition.replan_policy:
             policy = tool.definition.replan_policy
@@ -162,7 +178,10 @@ class ReplanManager:
                     step=step,
                 )
                 if should_replan:
-                    return True, f"工具 {step.tool} 触发条件满足: {policy.replan_condition}"
+                    return (
+                        True,
+                        f"工具 {step.tool} 触发条件满足: {policy.replan_condition}",
+                    )
             else:
                 return True, f"工具 {step.tool} 配置了强制 replan 检查"
 
@@ -229,7 +248,6 @@ class ReplanManager:
         except Exception:
             return False
 
-
     async def evaluate_and_replan(
         self,
         current_plan: ExecutionPlan,
@@ -260,13 +278,15 @@ class ReplanManager:
         """
         # 上下文变化强制全量重规划
         if context_changed:
-            patterns = [ExecutionPattern(
-                pattern_type=PatternType.INEFFICIENT_SEQUENCE,
-                description="上下文发生变化，需要重新评估计划",
-                frequency=1,
-                success_rate=0.0,
-                suggested_optimization="根据新的上下文重新规划",
-            )]
+            patterns = [
+                ExecutionPattern(
+                    pattern_type=PatternType.INEFFICIENT_SEQUENCE,
+                    description="上下文发生变化，需要重新评估计划",
+                    frequency=1,
+                    success_rate=0.0,
+                    suggested_optimization="根据新的上下文重新规划",
+                )
+            ]
             return await self._generate_alternative_plan(
                 current_plan, patterns, state, execution_history
             )
@@ -279,8 +299,10 @@ class ReplanManager:
 
         # 检查是否有需要触发重规划的模式
         problem_patterns = [
-            p for p in patterns
-            if p.pattern_type in [PatternType.CIRCULAR_DEPENDENCY, PatternType.REPEATED_FAILURE]
+            p
+            for p in patterns
+            if p.pattern_type
+            in [PatternType.CIRCULAR_DEPENDENCY, PatternType.REPEATED_FAILURE]
         ]
 
         if not problem_patterns:
@@ -328,35 +350,47 @@ class ReplanManager:
         completed_summary = []
         for i, step in enumerate(completed_steps):
             result = next((r for r in execution_history if r.step_id == step.id), None)
-            completed_summary.append({
-                "step": i + 1,
-                "id": step.id,
-                "tool": step.tool,
-                "description": step.description,
-                "success": result.success if result else "unknown",
-                "output_keys": list(result.output.keys())[:5] if result and result.output else [],
-            })
+            completed_summary.append(
+                {
+                    "step": i + 1,
+                    "id": step.id,
+                    "tool": step.tool,
+                    "description": step.description,
+                    "success": result.success if result else "unknown",
+                    "output_keys": list(result.output.keys())[:5]
+                    if result and result.output
+                    else [],
+                }
+            )
 
         # 构建待执行步骤摘要
         remaining_summary = []
         for i, step in enumerate(remaining_steps):
-            remaining_summary.append({
-                "step": current_step_index + i + 1,
-                "id": step.id,
-                "tool": step.tool,
-                "description": step.description,
-            })
+            remaining_summary.append(
+                {
+                    "step": current_step_index + i + 1,
+                    "id": step.id,
+                    "tool": step.tool,
+                    "description": step.description,
+                }
+            )
 
         # 获取工作记忆上下文
         working_memory_context = ""
         if self.context:
-            working_memory_context = self.context.working_memory.get_relevant_context("")
+            working_memory_context = self.context.working_memory.get_relevant_context(
+                ""
+            )
             consistency_context = self.context.consistency_checker.get_context_for_llm()
             if consistency_context:
                 working_memory_context += "\n\n" + consistency_context
 
         # 获取可用工具列表
-        tools_catalog = self.tool_registry.get_tools_catalog() if self.tool_registry else "无可用工具信息"
+        tools_catalog = (
+            self.tool_registry.get_tools_catalog()
+            if self.tool_registry
+            else "无可用工具信息"
+        )
 
         prompt = f"""你是一个智能任务规划器。当前执行计划遇到了问题，需要调整后续步骤。
 
@@ -451,7 +485,9 @@ class ReplanManager:
             return ExecutionPlan(
                 intent=current_plan.intent,
                 subtasks=all_steps,
-                expected_outcome=data.get("expected_outcome", current_plan.expected_outcome),
+                expected_outcome=data.get(
+                    "expected_outcome", current_plan.expected_outcome
+                ),
                 warnings=[f"增量重规划: {data.get('analysis', problem_description)}"],
             )
 
@@ -472,30 +508,40 @@ class ReplanManager:
             return None
 
         # 构建问题模式描述
-        patterns_description = "\n".join([
-            f"- {p.pattern_type.value}: {p.description} (频率: {p.frequency}, 成功率: {p.success_rate:.1%})"
-            for p in patterns
-        ])
+        patterns_description = "\n".join(
+            [
+                f"- {p.pattern_type.value}: {p.description} (频率: {p.frequency}, 成功率: {p.success_rate:.1%})"
+                for p in patterns
+            ]
+        )
 
         # 构建执行历史摘要
         history_summary = []
         for r in execution_history[-10:]:
-            history_summary.append({
-                "step_id": r.step_id,
-                "success": r.success,
-                "error": r.error[:200] if r.error else None,
-            })
+            history_summary.append(
+                {
+                    "step_id": r.step_id,
+                    "success": r.success,
+                    "error": r.error[:200] if r.error else None,
+                }
+            )
 
         # 构建当前计划摘要
         plan_summary = []
         for step in current_plan.subtasks:
-            plan_summary.append({
-                "id": step.id,
-                "tool": step.tool,
-                "description": step.description,
-            })
+            plan_summary.append(
+                {
+                    "id": step.id,
+                    "tool": step.tool,
+                    "description": step.description,
+                }
+            )
 
-        tools_catalog = self.tool_registry.get_tools_catalog() if self.tool_registry else "无可用工具信息"
+        tools_catalog = (
+            self.tool_registry.get_tools_catalog()
+            if self.tool_registry
+            else "无可用工具信息"
+        )
 
         prompt = f"""你是一个智能任务规划器。当前执行计划遇到了问题，需要生成替代方案。
 
@@ -564,24 +610,28 @@ class ReplanManager:
             new_subtasks = []
 
             for s in steps:
-                new_subtasks.append(PlanStep(
-                    id=str(s.get("step", len(new_subtasks) + 1)),
-                    description=s.get("description", ""),
-                    tool=s.get("name", s.get("tool")),
-                    parameters=s.get("parameters", {}),
-                    dependencies=s.get("dependencies", []),
-                    expectations=s.get("expectations"),
-                    on_fail_strategy=s.get("on_fail_strategy"),
-                    read_fields=s.get("read_fields", []),
-                    write_fields=s.get("write_fields", []),
-                ))
+                new_subtasks.append(
+                    PlanStep(
+                        id=str(s.get("step", len(new_subtasks) + 1)),
+                        description=s.get("description", ""),
+                        tool=s.get("name", s.get("tool")),
+                        parameters=s.get("parameters", {}),
+                        dependencies=s.get("dependencies", []),
+                        expectations=s.get("expectations"),
+                        on_fail_strategy=s.get("on_fail_strategy"),
+                        read_fields=s.get("read_fields", []),
+                        write_fields=s.get("write_fields", []),
+                    )
+                )
 
             return ExecutionPlan(
                 intent=plan_json.get("intent", "alternative_plan"),
                 subtasks=new_subtasks,
                 expected_outcome=plan_json.get("expected_outcome"),
                 state_schema=current_plan.state_schema,
-                warnings=[f"这是替代计划，原因: {plan_json.get('analysis', '检测到执行问题')}"],
+                warnings=[
+                    f"这是替代计划，原因: {plan_json.get('analysis', '检测到执行问题')}"
+                ],
             )
 
         except Exception:

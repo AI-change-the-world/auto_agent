@@ -8,12 +8,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from auto_agent import (
-    BaseTool,
-    OpenAIClient,
-    ToolDefinition,
-    ToolParameter,
-)
+from auto_agent import BaseTool, OpenAIClient, ToolDefinition, ToolParameter
 from auto_agent.models import (
     PostSuccessConfig,
     ResultHandlingConfig,
@@ -25,7 +20,7 @@ from auto_agent.models import (
 class AnalyzeRequirementsTool(BaseTool):
     """
     需求分析工具
-    
+
     分析用户需求，提取实体、关系、业务规则
     这是项目生成的第一步，输出会影响后续所有步骤
     """
@@ -117,7 +112,7 @@ class AnalyzeRequirementsTool(BaseTool):
     "auth_required": true/false
 }}"""
 
-            print("分析requirement prompt:\n"+ prompt)
+            print("分析requirement prompt:\n" + prompt)
 
             response = await self.llm_client.chat(
                 [{"role": "user", "content": prompt}],
@@ -146,7 +141,7 @@ class AnalyzeRequirementsTool(BaseTool):
 class DesignAPITool(BaseTool):
     """
     API 设计工具
-    
+
     基于需求分析结果设计 REST API 端点
     需要与需求分析结果保持一致
     """
@@ -217,7 +212,9 @@ class DesignAPITool(BaseTool):
         """设计 API"""
         try:
             entities_text = json.dumps(entities, ensure_ascii=False, indent=2)
-            relationships_text = json.dumps(relationships or [], ensure_ascii=False, indent=2)
+            relationships_text = json.dumps(
+                relationships or [], ensure_ascii=False, indent=2
+            )
 
             prompt = f"""请基于以下实体和关系设计 REST API 端点。
 
@@ -294,7 +291,7 @@ class DesignAPITool(BaseTool):
 class GenerateModelsTool(BaseTool):
     """
     数据模型生成工具
-    
+
     基于实体定义生成 Pydantic 模型代码
     需要与 API 设计中的 Schema 保持一致
     """
@@ -408,11 +405,10 @@ API Schema 参考:
             return {"success": False, "error": str(e)}
 
 
-
 class GenerateServiceTool(BaseTool):
     """
     服务层生成工具
-    
+
     基于模型和 API 设计生成服务层代码
     需要使用正确的模型类名和方法签名
     """
@@ -537,7 +533,7 @@ API 端点:
 class GenerateRouterTool(BaseTool):
     """
     路由层生成工具
-    
+
     基于 API 设计和服务层生成 FastAPI 路由代码
     需要正确调用服务层方法
     """
@@ -661,7 +657,7 @@ API 端点:
 class GenerateTestsTool(BaseTool):
     """
     测试用例生成工具
-    
+
     基于 API 端点生成测试用例
     """
 
@@ -771,7 +767,7 @@ API 端点:
 class ValidateProjectTool(BaseTool):
     """
     项目验证工具
-    
+
     验证生成的代码是否一致、完整
     """
 

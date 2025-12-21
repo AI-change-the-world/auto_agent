@@ -108,30 +108,32 @@ class ExecutionReportGenerator:
             "errors": plan.errors,
             "warnings": plan.warnings,
         }
-        
+
         # 整合追踪数据
         if trace_data:
-            report["trace"] = ExecutionReportGenerator._extract_trace_summary(trace_data)
-        
+            report["trace"] = ExecutionReportGenerator._extract_trace_summary(
+                trace_data
+            )
+
         # 整合检查点数据
         if checkpoints:
             report["checkpoints"] = checkpoints
-        
+
         # 整合工作记忆数据
         if working_memory:
             report["working_memory"] = working_memory
-        
+
         # 整合一致性违规数据
         if consistency_violations:
             report["consistency_violations"] = consistency_violations
-        
+
         return report
-    
+
     @staticmethod
     def _extract_trace_summary(trace_data: Dict[str, Any]) -> Dict[str, Any]:
         """从追踪数据中提取摘要信息"""
         summary = trace_data.get("summary", {})
-        
+
         return {
             "trace_id": trace_data.get("trace_id"),
             "duration_ms": trace_data.get("duration_ms"),
@@ -139,7 +141,9 @@ class ExecutionReportGenerator:
                 "total_calls": summary.get("llm_calls", {}).get("count", 0),
                 "total_tokens": summary.get("llm_calls", {}).get("total_tokens", 0),
                 "prompt_tokens": summary.get("llm_calls", {}).get("prompt_tokens", 0),
-                "response_tokens": summary.get("llm_calls", {}).get("response_tokens", 0),
+                "response_tokens": summary.get("llm_calls", {}).get(
+                    "response_tokens", 0
+                ),
                 "by_purpose": summary.get("llm_calls", {}).get("by_purpose", {}),
             },
             "tool_usage": {
@@ -215,55 +219,61 @@ class ExecutionReportGenerator:
             f"**执行时间**: {report_data['generated_at']}",
             f"**耗时**: {report_data.get('duration_seconds', 'N/A')} 秒",
         ]
-        
+
         # 添加追踪 ID（如果有）
         trace = report_data.get("trace", {})
         if trace.get("trace_id"):
             lines.append(f"**追踪ID**: `{trace['trace_id']}`")
-        
-        lines.extend([
-            "",
-            "**用户输入**:",
-            f"> {report_data['query']}",
-            "",
-            "---",
-            "",
-            "## 执行统计",
-            "",
-            "| 指标 | 值 |",
-            "|------|-----|",
-            f"| 总步骤数 | {report_data['statistics']['total_steps']} |",
-            f"| 已执行 | {report_data['statistics']['executed_steps']} |",
-            f"| 成功 | {report_data['statistics']['successful_steps']} |",
-            f"| 失败 | {report_data['statistics']['failed_steps']} |",
-            f"| 成功率 | {report_data['statistics']['success_rate']}% |",
-            "",
-        ])
-        
-        # 添加 LLM 使用统计（如果有追踪数据）
-        if trace.get("llm_usage"):
-            llm = trace["llm_usage"]
-            lines.extend([
-                "## LLM 调用统计",
+
+        lines.extend(
+            [
+                "",
+                "**用户输入**:",
+                f"> {report_data['query']}",
+                "",
+                "---",
+                "",
+                "## 执行统计",
                 "",
                 "| 指标 | 值 |",
                 "|------|-----|",
-                f"| 总调用次数 | {llm.get('total_calls', 0)} |",
-                f"| 总 Token 数 | {llm.get('total_tokens', 0):,} |",
-                f"| Prompt Tokens | {llm.get('prompt_tokens', 0):,} |",
-                f"| Response Tokens | {llm.get('response_tokens', 0):,} |",
+                f"| 总步骤数 | {report_data['statistics']['total_steps']} |",
+                f"| 已执行 | {report_data['statistics']['executed_steps']} |",
+                f"| 成功 | {report_data['statistics']['successful_steps']} |",
+                f"| 失败 | {report_data['statistics']['failed_steps']} |",
+                f"| 成功率 | {report_data['statistics']['success_rate']}% |",
                 "",
-            ])
-            
+            ]
+        )
+
+        # 添加 LLM 使用统计（如果有追踪数据）
+        if trace.get("llm_usage"):
+            llm = trace["llm_usage"]
+            lines.extend(
+                [
+                    "## LLM 调用统计",
+                    "",
+                    "| 指标 | 值 |",
+                    "|------|-----|",
+                    f"| 总调用次数 | {llm.get('total_calls', 0)} |",
+                    f"| 总 Token 数 | {llm.get('total_tokens', 0):,} |",
+                    f"| Prompt Tokens | {llm.get('prompt_tokens', 0):,} |",
+                    f"| Response Tokens | {llm.get('response_tokens', 0):,} |",
+                    "",
+                ]
+            )
+
             # 按目的分类
             by_purpose = llm.get("by_purpose", {})
             if by_purpose:
-                lines.extend([
-                    "**按调用目的分类**:",
-                    "",
-                    "| 目的 | 调用次数 | Token 数 |",
-                    "|------|----------|----------|",
-                ])
+                lines.extend(
+                    [
+                        "**按调用目的分类**:",
+                        "",
+                        "| 目的 | 调用次数 | Token 数 |",
+                        "|------|----------|----------|",
+                    ]
+                )
                 purpose_names = {
                     "planning": "任务规划",
                     "binding_plan": "绑定规划",
@@ -283,9 +293,11 @@ class ExecutionReportGenerator:
                 }
                 for purpose, data in by_purpose.items():
                     name = purpose_names.get(purpose, purpose)
-                    lines.append(f"| {name} | {data.get('count', 0)} | {data.get('tokens', 0):,} |")
+                    lines.append(
+                        f"| {name} | {data.get('count', 0)} | {data.get('tokens', 0):,} |"
+                    )
                 lines.append("")
-        
+
         # 添加参数绑定统计（如果有）
         binding_ops = trace.get("binding_ops", {})
         if binding_ops and binding_ops.get("total_bindings", 0) > 0:
@@ -293,69 +305,77 @@ class ExecutionReportGenerator:
             resolved = binding_ops.get("resolved_bindings", 0)
             fallback = binding_ops.get("fallback_bindings", 0)
             success_rate = (resolved / total * 100) if total > 0 else 0
-            
-            lines.extend([
-                "## 参数绑定统计",
-                "",
-                "| 指标 | 值 |",
-                "|------|-----|",
-                f"| 绑定规划次数 | {binding_ops.get('plan_creates', 0)} |",
-                f"| 绑定解析次数 | {binding_ops.get('resolves', 0)} |",
-                f"| LLM Fallback 次数 | {binding_ops.get('fallbacks', 0)} |",
-                f"| 总绑定数 | {total} |",
-                f"| 成功解析 | {resolved} |",
-                f"| 需要 Fallback | {fallback} |",
-                f"| 绑定成功率 | {success_rate:.1f}% |",
-                "",
-            ])
-        
+
+            lines.extend(
+                [
+                    "## 参数绑定统计",
+                    "",
+                    "| 指标 | 值 |",
+                    "|------|-----|",
+                    f"| 绑定规划次数 | {binding_ops.get('plan_creates', 0)} |",
+                    f"| 绑定解析次数 | {binding_ops.get('resolves', 0)} |",
+                    f"| LLM Fallback 次数 | {binding_ops.get('fallbacks', 0)} |",
+                    f"| 总绑定数 | {total} |",
+                    f"| 成功解析 | {resolved} |",
+                    f"| 需要 Fallback | {fallback} |",
+                    f"| 绑定成功率 | {success_rate:.1f}% |",
+                    "",
+                ]
+            )
+
         # 添加流程事件统计（如果有）
         if trace.get("flow_events"):
             flow = trace["flow_events"]
             total_events = sum(flow.values())
             if total_events > 0:
-                lines.extend([
-                    "## 流程控制事件",
-                    "",
-                    "| 事件类型 | 次数 |",
-                    "|----------|------|",
-                    f"| 重试 | {flow.get('retries', 0)} |",
-                    f"| 跳转 | {flow.get('jumps', 0)} |",
-                    f"| 中止 | {flow.get('aborts', 0)} |",
-                    f"| 重规划 | {flow.get('replans', 0)} |",
-                    "",
-                ])
-        
+                lines.extend(
+                    [
+                        "## 流程控制事件",
+                        "",
+                        "| 事件类型 | 次数 |",
+                        "|----------|------|",
+                        f"| 重试 | {flow.get('retries', 0)} |",
+                        f"| 跳转 | {flow.get('jumps', 0)} |",
+                        f"| 中止 | {flow.get('aborts', 0)} |",
+                        f"| 重规划 | {flow.get('replans', 0)} |",
+                        "",
+                    ]
+                )
+
         # 添加一致性检查点（如果有）
         checkpoints = report_data.get("checkpoints", [])
         if checkpoints:
-            lines.extend([
-                "## 一致性检查点",
-                "",
-                "执行过程中注册的关键检查点，用于后续一致性验证和问题修正。",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## 一致性检查点",
+                    "",
+                    "执行过程中注册的关键检查点，用于后续一致性验证和问题修正。",
+                    "",
+                ]
+            )
             for cp in checkpoints:
                 cp_id = cp.get("checkpoint_id", "unknown")
                 cp_type = cp.get("checkpoint_type", "unknown")
                 step_id = cp.get("step_id", "?")
-                
+
                 lines.append(f"### 📍 {cp_id} [{cp_type}]")
                 lines.append("")
                 lines.append(f"- **步骤**: Step {step_id}")
-                
+
                 # 显示关键元素
                 key_elements = cp.get("key_elements", {})
                 if key_elements:
                     lines.append("- **关键元素**:")
                     for elem_type, elements in key_elements.items():
                         if isinstance(elements, list):
-                            lines.append(f"  - {elem_type}: {', '.join(str(e) for e in elements[:10])}")
+                            lines.append(
+                                f"  - {elem_type}: {', '.join(str(e) for e in elements[:10])}"
+                            )
                             if len(elements) > 10:
                                 lines.append(f"    ... 还有 {len(elements) - 10} 个")
                         else:
                             lines.append(f"  - {elem_type}: {elements}")
-                
+
                 # 显示约束
                 constraints = cp.get("constraints", [])
                 if constraints:
@@ -364,39 +384,45 @@ class ExecutionReportGenerator:
                         lines.append(f"  - {c}")
                     if len(constraints) > 5:
                         lines.append(f"  - ... 还有 {len(constraints) - 5} 条")
-                
+
                 lines.append("")
-        
+
         # 添加一致性违规（如果有）
         violations = report_data.get("consistency_violations", [])
         if violations:
-            lines.extend([
-                "## ⚠️ 一致性违规",
-                "",
-                "执行过程中检测到的一致性问题，可用于后续修正。",
-                "",
-                "| 严重程度 | 检查点 | 问题描述 | 建议 |",
-                "|----------|--------|----------|------|",
-            ])
+            lines.extend(
+                [
+                    "## ⚠️ 一致性违规",
+                    "",
+                    "执行过程中检测到的一致性问题，可用于后续修正。",
+                    "",
+                    "| 严重程度 | 检查点 | 问题描述 | 建议 |",
+                    "|----------|--------|----------|------|",
+                ]
+            )
             for v in violations:
                 severity = v.get("severity", "warning")
                 severity_icon = "🔴" if severity == "critical" else "🟡"
                 cp_id = v.get("checkpoint_id", "N/A")
                 desc = v.get("description", "未知问题")[:50]
                 suggestion = v.get("suggestion", "")[:30]
-                lines.append(f"| {severity_icon} {severity} | {cp_id} | {desc} | {suggestion} |")
+                lines.append(
+                    f"| {severity_icon} {severity} | {cp_id} | {desc} | {suggestion} |"
+                )
             lines.append("")
-        
+
         # 添加工作记忆（如果有）
         working_memory = report_data.get("working_memory", {})
         if working_memory:
-            lines.extend([
-                "## 🧠 工作记忆",
-                "",
-                "执行过程中提取的设计决策、约束和待办事项。",
-                "",
-            ])
-            
+            lines.extend(
+                [
+                    "## 🧠 工作记忆",
+                    "",
+                    "执行过程中提取的设计决策、约束和待办事项。",
+                    "",
+                ]
+            )
+
             # 设计决策
             decisions = working_memory.get("decisions", [])
             if decisions:
@@ -412,7 +438,7 @@ class ExecutionReportGenerator:
                 if len(decisions) > 10:
                     lines.append(f"- ... 还有 {len(decisions) - 10} 条决策")
                 lines.append("")
-            
+
             # 约束条件
             constraints = working_memory.get("constraints", [])
             if constraints:
@@ -427,7 +453,7 @@ class ExecutionReportGenerator:
                 if len(constraints) > 10:
                     lines.append(f"- ... 还有 {len(constraints) - 10} 条约束")
                 lines.append("")
-            
+
             # 接口定义
             interfaces = working_memory.get("interfaces", [])
             if interfaces:
@@ -445,7 +471,7 @@ class ExecutionReportGenerator:
                 if len(interfaces) > 10:
                     lines.append(f"- ... 还有 {len(interfaces) - 10} 个接口")
                 lines.append("")
-            
+
             # 待办事项
             todos = working_memory.get("todos", [])
             if todos:
@@ -460,17 +486,19 @@ class ExecutionReportGenerator:
                 if len(todos) > 10:
                     lines.append(f"- ... 还有 {len(todos) - 10} 条待办")
                 lines.append("")
-        
-        lines.extend([
-            "## 执行流程",
-            "",
-            "```mermaid",
-            report_data["mermaid_diagram"],
-            "```",
-            "",
-            "## 步骤详情",
-            "",
-        ])
+
+        lines.extend(
+            [
+                "## 执行流程",
+                "",
+                "```mermaid",
+                report_data["mermaid_diagram"],
+                "```",
+                "",
+                "## 步骤详情",
+                "",
+            ]
+        )
 
         for step in report_data["steps"]:
             status_icon = {
@@ -497,7 +525,7 @@ class ExecutionReportGenerator:
             lines.append("")
 
         return "\n".join(lines)
-    
+
     @staticmethod
     def generate_detailed_markdown_report(
         report_data: Dict[str, Any],
@@ -506,7 +534,7 @@ class ExecutionReportGenerator:
     ) -> str:
         """
         生成详细的 Markdown 报告（包含完整追踪信息）
-        
+
         Args:
             report_data: 基础报告数据
             trace_data: 完整追踪数据（包含所有 spans 和 events）
@@ -514,37 +542,45 @@ class ExecutionReportGenerator:
             show_full_content: 是否显示完整的 prompt/response 内容
                 - True: 显示完整内容（适合详细分析）
                 - False: 显示预览（适合快速浏览）
-            
+
         Returns:
             详细的 Markdown 报告
         """
         # 先生成基础报告
         lines = [ExecutionReportGenerator.generate_markdown_report(report_data)]
-        
+
         if not trace_data:
             return lines[0]
-        
+
         # 添加详细追踪信息
-        lines.extend([
-            "",
-            "---",
-            "",
-            "## 详细追踪日志",
-            "",
-        ])
-        
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "## 详细追踪日志",
+                "",
+            ]
+        )
+
         # 遍历所有 spans
         root_span = trace_data.get("spans", {})
         if root_span:
-            lines.extend(ExecutionReportGenerator._format_span_tree(root_span, 0, show_full_content))
-        
+            lines.extend(
+                ExecutionReportGenerator._format_span_tree(
+                    root_span, 0, show_full_content
+                )
+            )
+
         return "\n".join(lines)
-    
+
     @staticmethod
-    def _format_span_tree(span: Dict[str, Any], depth: int, show_full: bool = True) -> List[str]:
+    def _format_span_tree(
+        span: Dict[str, Any], depth: int, show_full: bool = True
+    ) -> List[str]:
         """
         递归格式化 span 树
-        
+
         Args:
             span: span 数据
             depth: 缩进深度
@@ -552,34 +588,40 @@ class ExecutionReportGenerator:
         """
         lines = []
         indent = "  " * depth
-        
+
         name = span.get("name", "unknown")
         span_type = span.get("span_type", "")
         duration = span.get("duration_ms", 0)
-        
+
         if name != "root":
             type_badge = f"[{span_type}]" if span_type else ""
             lines.append(f"{indent}### {type_badge} {name} ({duration:.1f}ms)")
             lines.append("")
-        
+
         # 格式化事件
         events = span.get("events", [])
         for event in events:
-            event_lines = ExecutionReportGenerator._format_event(event, depth + 1, show_full)
+            event_lines = ExecutionReportGenerator._format_event(
+                event, depth + 1, show_full
+            )
             lines.extend(event_lines)
-        
+
         # 递归处理子 spans
         children = span.get("children", [])
         for child in children:
-            lines.extend(ExecutionReportGenerator._format_span_tree(child, depth + 1, show_full))
-        
+            lines.extend(
+                ExecutionReportGenerator._format_span_tree(child, depth + 1, show_full)
+            )
+
         return lines
-    
+
     @staticmethod
-    def _format_event(event: Dict[str, Any], depth: int, show_full: bool = True) -> List[str]:
+    def _format_event(
+        event: Dict[str, Any], depth: int, show_full: bool = True
+    ) -> List[str]:
         """
         格式化单个事件
-        
+
         Args:
             event: 事件数据
             depth: 缩进深度
@@ -588,17 +630,17 @@ class ExecutionReportGenerator:
         lines = []
         indent = "  " * depth
         event_type = event.get("event_type", "unknown")
-        
+
         if event_type == "llm_call":
             purpose = event.get("purpose", "unknown")
             model = event.get("model", "unknown")
             tokens = event.get("total_tokens", 0)
             duration = event.get("duration_ms", 0)
-            
+
             lines.append(f"{indent}- 🤖 **LLM调用** [{purpose}]")
             lines.append(f"{indent}  - 模型: {model}")
             lines.append(f"{indent}  - Tokens: {tokens:,} ({duration:.1f}ms)")
-            
+
             # 显示 prompt（完整或预览）
             prompt = event.get("prompt", event.get("prompt_preview", ""))
             if prompt:
@@ -612,7 +654,7 @@ class ExecutionReportGenerator:
                 else:
                     preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
                     lines.append(f"{indent}  - Prompt: `{preview}`")
-            
+
             # 显示 response（完整或预览）
             response = event.get("response", event.get("response_preview", ""))
             if response and show_full:
@@ -621,28 +663,30 @@ class ExecutionReportGenerator:
                 for line in response.split("\n"):
                     lines.append(f"{indent}    {line}")
                 lines.append(f"{indent}    ```")
-            
+
             lines.append("")
-            
+
         elif event_type == "tool_call":
             tool_name = event.get("tool_name", "unknown")
             success = event.get("success", False)
             duration = event.get("duration_ms", 0)
             status = "✅" if success else "❌"
-            
-            lines.append(f"{indent}- 🔧 **工具调用** {status} `{tool_name}` ({duration:.1f}ms)")
-            
+
+            lines.append(
+                f"{indent}- 🔧 **工具调用** {status} `{tool_name}` ({duration:.1f}ms)"
+            )
+
             if not success and event.get("error"):
                 lines.append(f"{indent}  - 错误: {event['error']}")
-            
+
             lines.append("")
-            
+
         elif event_type == "flow":
             action = event.get("action", "unknown")
             reason = event.get("reason", "")
             from_step = event.get("from_step", "")
             to_step = event.get("to_step", "")
-            
+
             action_icons = {
                 "retry": "🔄",
                 "jump": "⏭️",
@@ -651,7 +695,7 @@ class ExecutionReportGenerator:
                 "fallback": "↩️",
             }
             icon = action_icons.get(action, "❓")
-            
+
             lines.append(f"{indent}- {icon} **流程控制** [{action}]")
             lines.append(f"{indent}  - 原因: {reason}")
             if from_step:
@@ -659,17 +703,17 @@ class ExecutionReportGenerator:
             if to_step:
                 lines.append(f"{indent}  - 到步骤: {to_step}")
             lines.append("")
-            
+
         elif event_type == "memory":
             action = event.get("action", "unknown")
             layer = event.get("memory_layer", "")
             result_count = event.get("result_count", 0)
-            
+
             lines.append(f"{indent}- 🧠 **记忆操作** [{action}] {layer}")
             if result_count:
                 lines.append(f"{indent}  - 结果数: {result_count}")
             lines.append("")
-        
+
         return lines
 
     @staticmethod

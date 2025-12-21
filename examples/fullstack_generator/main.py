@@ -31,7 +31,9 @@ from pathlib import Path
 from typing import Any, Dict
 
 # 添加项目根目录到 path，使用本地版本而非安装的包
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 from examples.fullstack_generator.runner import FullstackGeneratorRunner
 
@@ -44,11 +46,11 @@ def save_execution_report(
     """使用框架内置的报告生成器保存执行报告"""
     from auto_agent.core.report.generator import ExecutionReportGenerator
     from auto_agent.models import ExecutionPlan, PlanStep, SubTaskResult
-    
+
     output_dir = Path(result.get("output_dir", "."))
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_path = output_dir / f"execution_report_{timestamp}.md"
-    
+
     trace = result.get("trace", {})
     trace_full = result.get("trace_full", {})
     checkpoints = result.get("checkpoints", [])
@@ -56,7 +58,7 @@ def save_execution_report(
     violations = result.get("consistency_violations", [])
     plan = result.get("plan")
     results = result.get("results", [])
-    
+
     # 如果有完整的执行数据，使用完整报告生成
     if plan and results:
         # 使用完整的报告生成
@@ -71,10 +73,10 @@ def save_execution_report(
             working_memory=working_memory,
             consistency_violations=violations,
         )
-        
+
         # 生成 markdown 报告
         report = ExecutionReportGenerator.generate_markdown_report(report_data)
-        
+
         # 添加项目特定信息
         extra_info = f"""
 ## 项目信息
@@ -87,9 +89,9 @@ def save_execution_report(
 """
         for f in result.get("generated_files", []):
             extra_info += f"- `{f}`\n"
-        
+
         report = report + "\n" + extra_info
-        
+
     elif trace:
         # 只有 trace 数据时的简化报告
         report_data = {
@@ -101,24 +103,30 @@ def save_execution_report(
             "statistics": {
                 "total_steps": len(result.get("generated_files", [])) + 2,
                 "executed_steps": len(result.get("generated_files", [])) + 2,
-                "successful_steps": len(result.get("generated_files", [])) + 2 if result.get("success") else 0,
+                "successful_steps": len(result.get("generated_files", [])) + 2
+                if result.get("success")
+                else 0,
                 "failed_steps": 0 if result.get("success") else 1,
                 "success_rate": 100.0 if result.get("success") else 0.0,
             },
             "steps": [],
             "final_state": {"generated_files": result.get("generated_files", [])},
             "mermaid_diagram": "graph TD\n    Start([开始]) --> End([结束])",
-            "errors": [] if result.get("success") else [result.get("error", "未知错误")],
+            "errors": []
+            if result.get("success")
+            else [result.get("error", "未知错误")],
             "warnings": [],
-            "trace": ExecutionReportGenerator._extract_trace_summary(trace) if trace else {},
+            "trace": ExecutionReportGenerator._extract_trace_summary(trace)
+            if trace
+            else {},
             "checkpoints": checkpoints,
             "working_memory": working_memory,
             "consistency_violations": violations,
         }
-        
+
         # 生成 markdown 报告
         report = ExecutionReportGenerator.generate_markdown_report(report_data)
-        
+
         # 添加项目特定信息
         extra_info = f"""
 ## 项目信息
@@ -131,7 +139,7 @@ def save_execution_report(
 """
         for f in result.get("generated_files", []):
             extra_info += f"- `{f}`\n"
-        
+
         report = report + "\n" + extra_info
     else:
         # 简单报告
@@ -146,13 +154,13 @@ def save_execution_report(
 """
         for f in result.get("generated_files", []):
             report += f"- `{f}`\n"
-    
+
     report_path.write_text(report, encoding="utf-8")
-    
+
     # 如果有完整的 trace 数据，也生成详细报告
     if trace_full:
         detailed_report_path = output_dir / f"execution_report_detailed_{timestamp}.md"
-        
+
         # 构建详细报告数据
         if plan and results:
             detailed_report_data = ExecutionReportGenerator.generate_report_data(
@@ -167,17 +175,17 @@ def save_execution_report(
                 consistency_violations=violations,
             )
         else:
-            detailed_report_data = report_data.copy() if 'report_data' in dir() else {}
-        
+            detailed_report_data = report_data.copy() if "report_data" in dir() else {}
+
         detailed_report = ExecutionReportGenerator.generate_detailed_markdown_report(
             detailed_report_data,
             trace_data=trace_full,
             show_full_content=True,
         )
-        
+
         detailed_report_path.write_text(detailed_report, encoding="utf-8")
         print(f"📋 详细追踪报告: {detailed_report_path}")
-    
+
     return str(report_path)
 
 
@@ -207,7 +215,6 @@ SAMPLE_REQUIREMENTS = {
    - 用户不能关注自己
    - 删除文章时同时删除相关评论
 """,
-
     "ecommerce": """
 一个电商系统 API，包含以下功能：
 
@@ -236,7 +243,6 @@ SAMPLE_REQUIREMENTS = {
    - 支付成功后扣减库存
    - 取消订单恢复库存
 """,
-
     "task": """
 一个任务管理系统 API，包含以下功能：
 
@@ -330,7 +336,7 @@ async def main():
 
     # 创建执行器并运行
     runner = FullstackGeneratorRunner()
-    
+
     result = await runner.run(
         requirements=requirements,
         project_name=project_name,
@@ -341,12 +347,12 @@ async def main():
     print("\n" + "=" * 70)
     print("📊 执行结果")
     print("=" * 70)
-    
+
     if result["success"]:
         print(f"\n✅ 项目生成成功!")
         print(f"   📁 输出目录: {result['output_dir']}")
         print(f"   📄 生成文件: {', '.join(result['generated_files'])}")
-        
+
         # 显示追踪统计
         trace = result.get("trace")
         if trace:
@@ -356,7 +362,7 @@ async def main():
             print(f"   - 追踪ID: {trace.get('trace_id', 'N/A')}")
             print(f"   - LLM调用: {llm_calls.get('count', 0)} 次")
             print(f"   - Token消耗: {llm_calls.get('total_tokens', 0):,}")
-        
+
         # 生成 markdown 报告
         report_path = save_execution_report(
             result=result,

@@ -6,19 +6,19 @@
 
 import json
 import re
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from auto_agent.models import PlanStep, SubTaskResult
 
 if TYPE_CHECKING:
+    from auto_agent.core.context import ConsistencyViolation, ExecutionContext
     from auto_agent.llm.client import LLMClient
-    from auto_agent.core.context import ExecutionContext, ConsistencyViolation
 
 
 class ConsistencyManager:
     """
     一致性管理器
-    
+
     负责：
     1. 注册一致性检查点
     2. 检查当前步骤与历史检查点的一致性
@@ -167,13 +167,13 @@ class ConsistencyManager:
 [{cp.step_id}] 类型: {cp.artifact_type}
 描述: {cp.description}
 关键元素: {json.dumps(cp.key_elements, ensure_ascii=False)[:500]}
-约束: {', '.join(cp.constraints_for_future[:3])}"""
+约束: {", ".join(cp.constraints_for_future[:3])}"""
             checkpoints_text.append(cp_text)
 
         prompt = f"""检查当前步骤是否与之前的检查点保持一致。
 
 【历史检查点】
-{''.join(checkpoints_text)}
+{"".join(checkpoints_text)}
 
 【当前步骤】
 工具: {step.tool}

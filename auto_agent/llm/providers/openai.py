@@ -46,7 +46,7 @@ class OpenAIClient(LLMClient):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.default_temperature = default_temperature
-        
+
         self._client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -73,7 +73,7 @@ class OpenAIClient(LLMClient):
             LLM 响应内容
         """
         start_time = time.time()
-        
+
         # 构建参数
         params = {
             "model": self.model,
@@ -82,7 +82,7 @@ class OpenAIClient(LLMClient):
             "stream": True,
             "stream_options": {"include_usage": True},  # 获取 token 统计
         }
-        
+
         # 合并额外参数
         for key in ["top_p", "presence_penalty", "frequency_penalty", "stop"]:
             if key in kwargs:
@@ -93,21 +93,21 @@ class OpenAIClient(LLMClient):
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
-        
+
         stream = await self._client.chat.completions.create(**params)
         async for chunk in stream:
             # 收集内容
             if chunk.choices and chunk.choices[0].delta.content:
                 chunks.append(chunk.choices[0].delta.content)
-            
+
             # 最后一个 chunk 包含 usage 信息
             if chunk.usage:
                 prompt_tokens = chunk.usage.prompt_tokens
                 completion_tokens = chunk.usage.completion_tokens
                 total_tokens = chunk.usage.total_tokens
-        
+
         content = "".join(chunks)
-        
+
         # 记录追踪事件
         duration_ms = (time.time() - start_time) * 1000
         self._trace_llm_call(
@@ -120,7 +120,7 @@ class OpenAIClient(LLMClient):
             temperature=temperature or self.default_temperature,
             duration_ms=duration_ms,
         )
-        
+
         return content
 
     async def stream_chat(
@@ -147,7 +147,7 @@ class OpenAIClient(LLMClient):
         }
 
         stream = await self._client.chat.completions.create(**params)
-        
+
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content
@@ -181,7 +181,7 @@ class OpenAIClient(LLMClient):
         )
 
         message = response.choices[0].message
-        
+
         if message.tool_calls:
             return {
                 "type": "tool_calls",
@@ -194,7 +194,7 @@ class OpenAIClient(LLMClient):
                     for tc in message.tool_calls
                 ],
             }
-        
+
         return {
             "type": "message",
             "content": message.content or "",
@@ -225,6 +225,7 @@ class OpenAIClient(LLMClient):
         """记录 LLM 调用到追踪系统"""
         try:
             from auto_agent.tracing import trace_llm_call
+
             trace_llm_call(
                 purpose=purpose,
                 model=self.model,

@@ -10,18 +10,14 @@ Execution Engine 模块
 - state.py: 状态管理
 """
 
-from auto_agent.core.executor.base import (
-    ExecutionEngine,
-    ExecutionPattern,
-    PatternType,
-)
-from auto_agent.core.executor.param_builder import ParameterBuilder
-from auto_agent.core.executor.replan import ReplanManager
+from auto_agent.core.executor.base import ExecutionEngine, ExecutionPattern, PatternType
 from auto_agent.core.executor.consistency import ConsistencyManager
+from auto_agent.core.executor.param_builder import ParameterBuilder
 from auto_agent.core.executor.post_policy import PostPolicyManager
+from auto_agent.core.executor.replan import ReplanManager
 from auto_agent.core.executor.state import (
-    get_nested_value,
     compress_state_for_llm,
+    get_nested_value,
     update_state_from_result,
 )
 

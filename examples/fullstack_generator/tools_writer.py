@@ -9,11 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from auto_agent import (
-    BaseTool,
-    ToolDefinition,
-    ToolParameter,
-)
+from auto_agent import BaseTool, ToolDefinition, ToolParameter
 from auto_agent.models import (
     PostSuccessConfig,
     ResultHandlingConfig,
@@ -25,7 +21,7 @@ from auto_agent.models import (
 class CodeWriterTool(BaseTool):
     """
     代码写入工具
-    
+
     将生成的代码写入文件，支持：
     - 自动创建目录
     - 添加文件头注释
@@ -119,7 +115,9 @@ class CodeWriterTool(BaseTool):
 
             # 备份已存在的文件
             if file_path.exists():
-                backup_path = file_path.with_suffix(f".bak.{datetime.now().strftime('%H%M%S')}")
+                backup_path = file_path.with_suffix(
+                    f".bak.{datetime.now().strftime('%H%M%S')}"
+                )
                 file_path.rename(backup_path)
 
             # 添加文件头注释
@@ -175,7 +173,7 @@ class CodeWriterTool(BaseTool):
 class ProjectInitTool(BaseTool):
     """
     项目初始化工具
-    
+
     创建项目目录结构和基础文件
     """
 

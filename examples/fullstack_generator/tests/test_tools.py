@@ -5,21 +5,23 @@
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(
+    0,
+    os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    ),
+)
 
 from examples.fullstack_generator.tools import (
     AnalyzeRequirementsTool,
     DesignAPITool,
     GenerateModelsTool,
-    GenerateServiceTool,
     GenerateRouterTool,
+    GenerateServiceTool,
     GenerateTestsTool,
     ValidateProjectTool,
 )
-from examples.fullstack_generator.tools_writer import (
-    CodeWriterTool,
-    ProjectInitTool,
-)
+from examples.fullstack_generator.tools_writer import CodeWriterTool, ProjectInitTool
 
 
 def test_tool_post_policy():
@@ -55,11 +57,17 @@ def test_tool_post_policy():
         print(f"      category: {defn.category}")
         print(f"      is_high_impact: {policy.is_high_impact()}")
         print(f"      should_check_consistency: {policy.should_check_consistency()}")
-        print(f"      should_register_checkpoint: {policy.should_register_checkpoint()}")
-        print(f"      should_extract_working_memory: {policy.should_extract_working_memory()}")
+        print(
+            f"      should_register_checkpoint: {policy.should_register_checkpoint()}"
+        )
+        print(
+            f"      should_extract_working_memory: {policy.should_extract_working_memory()}"
+        )
 
         if policy.post_success and policy.post_success.consistency_check_against:
-            print(f"      consistency_check_against: {policy.post_success.consistency_check_against}")
+            print(
+                f"      consistency_check_against: {policy.post_success.consistency_check_against}"
+            )
 
         if policy.result_handling and policy.result_handling.checkpoint_type:
             print(f"      checkpoint_type: {policy.result_handling.checkpoint_type}")
@@ -119,7 +127,9 @@ def test_tool_output_schema():
         print(f"\n   [{defn.name}]")
         if defn.output_schema:
             for key, schema in defn.output_schema.items():
-                print(f"      {key}: {schema.get('type', 'any')} - {schema.get('description', '')}")
+                print(
+                    f"      {key}: {schema.get('type', 'any')} - {schema.get('description', '')}"
+                )
 
     return True
 

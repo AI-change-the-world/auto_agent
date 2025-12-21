@@ -7,26 +7,27 @@
 import asyncio
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from auto_agent.core.executor.state import compress_state_for_llm, get_nested_value
 from auto_agent.models import (
+    BindingFallbackPolicy,
     BindingPlan,
     BindingSourceType,
     ParameterBinding,
     PlanStep,
     StepBindings,
 )
-from auto_agent.core.executor.state import get_nested_value, compress_state_for_llm
 
 if TYPE_CHECKING:
-    from auto_agent.llm.client import LLMClient
     from auto_agent.core.context import ExecutionContext
+    from auto_agent.llm.client import LLMClient
 
 
 class ParameterBuilder:
     """
     参数构造器
-    
+
     负责：
     1. 绑定解析（从 BindingPlan 解析参数）
     2. LLM 推理（fallback 时使用 LLM 构造参数）
@@ -46,6 +47,9 @@ class ParameterBuilder:
         self.step_outputs = step_outputs or {}
         self.context = context
         self.tool_registry = tool_registry
+        # LLM 构参缓存：避免重试/重复步骤导致的重复调用
+        # key: (step_id, tool_name, missing_params_tuple, state_fingerprint)
+        self._llm_args_cache: Dict[tuple, Dict[str, Any]] = {}
 
     def update_step_output(self, step_id: str, output: Any) -> None:
         """更新步骤输出缓存"""
@@ -74,7 +78,8 @@ class ParameterBuilder:
             - binding_details: 每个参数的绑定详情（用于 tracing）
         """
         import time
-        from auto_agent.tracing import trace_binding_event, BindingAction
+
+        from auto_agent.tracing import BindingAction, trace_binding_event
 
         start_time = time.time()
         resolved = {}
@@ -90,6 +95,9 @@ class ParameterBuilder:
                 "confidence": binding.confidence,
                 "threshold": threshold,
                 "reasoning": binding.reasoning,
+                "fallback": binding.fallback.value
+                if hasattr(binding, "fallback")
+                else "llm_infer",
             }
 
             # 跳过已有值的参数
@@ -102,8 +110,59 @@ class ParameterBuilder:
 
             # 检查置信度
             if binding.confidence < threshold:
+                # ERROR 策略：不允许走 LLM fallback，但仍可尝试直接解析；解析失败则报错
+                if (
+                    getattr(binding, "fallback", BindingFallbackPolicy.LLM_INFER)
+                    == BindingFallbackPolicy.ERROR
+                ):
+                    value, success, resolve_detail = (
+                        self._resolve_single_binding_with_trace(binding, state)
+                    )
+                    detail.update(resolve_detail)
+                    if success:
+                        detail["status"] = "resolved_low_confidence"
+                        detail["reason"] = (
+                            f"resolved_under_low_confidence ({binding.confidence:.2f} < {threshold})"
+                        )
+                        detail["confidence_gap"] = threshold - binding.confidence
+                        detail["value_type"] = type(value).__name__
+                        detail["value_preview"] = self._get_value_preview(value)
+                        resolved[param_name] = value
+                        binding_details.append(detail)
+                        continue
+
+                    detail["status"] = "error"
+                    detail["reason"] = resolve_detail.get(
+                        "error", f"low_confidence_and_resolve_failed ({binding.confidence:.2f} < {threshold})"
+                    )
+                    binding_details.append(detail)
+                    raise ValueError(
+                        f"Parameter binding ERROR: cannot resolve {step_bindings.tool}.{param_name}"
+                    )
+
+                # 如果配置了 USE_DEFAULT 且有默认值，直接使用默认值，无需再调用 LLM
+                if (
+                    getattr(binding, "fallback", BindingFallbackPolicy.LLM_INFER)
+                    == BindingFallbackPolicy.USE_DEFAULT
+                    and binding.default_value is not None
+                ):
+                    detail["status"] = "resolved_default"
+                    detail["reason"] = (
+                        f"low_confidence_use_default ({binding.confidence:.2f} < {threshold})"
+                    )
+                    detail["confidence_gap"] = threshold - binding.confidence
+                    detail["value_type"] = type(binding.default_value).__name__
+                    detail["value_preview"] = self._get_value_preview(
+                        binding.default_value
+                    )
+                    resolved[param_name] = binding.default_value
+                    binding_details.append(detail)
+                    continue
+
                 detail["status"] = "fallback"
-                detail["reason"] = f"low_confidence ({binding.confidence:.2f} < {threshold})"
+                detail["reason"] = (
+                    f"low_confidence ({binding.confidence:.2f} < {threshold})"
+                )
                 detail["confidence_gap"] = threshold - binding.confidence
                 fallback_params.append(param_name)
                 binding_details.append(detail)
@@ -122,9 +181,35 @@ class ParameterBuilder:
                 detail["value_preview"] = self._get_value_preview(value)
                 resolved[param_name] = value
             else:
-                detail["status"] = "fallback"
-                detail["reason"] = resolve_detail.get("error", "resolve_failed")
-                fallback_params.append(param_name)
+                # 如果解析失败但允许使用默认值，则直接使用默认值
+                if (
+                    getattr(binding, "fallback", BindingFallbackPolicy.LLM_INFER)
+                    == BindingFallbackPolicy.USE_DEFAULT
+                    and binding.default_value is not None
+                ):
+                    detail["status"] = "resolved_default"
+                    detail["reason"] = resolve_detail.get(
+                        "error", "resolve_failed_use_default"
+                    )
+                    detail["value_type"] = type(binding.default_value).__name__
+                    detail["value_preview"] = self._get_value_preview(
+                        binding.default_value
+                    )
+                    resolved[param_name] = binding.default_value
+                elif (
+                    getattr(binding, "fallback", BindingFallbackPolicy.LLM_INFER)
+                    == BindingFallbackPolicy.ERROR
+                ):
+                    detail["status"] = "error"
+                    detail["reason"] = resolve_detail.get("error", "resolve_failed_error_policy")
+                    binding_details.append(detail)
+                    raise ValueError(
+                        f"Parameter binding ERROR: cannot resolve {step_bindings.tool}.{param_name}"
+                    )
+                else:
+                    detail["status"] = "fallback"
+                    detail["reason"] = resolve_detail.get("error", "resolve_failed")
+                    fallback_params.append(param_name)
 
             binding_details.append(detail)
 
@@ -140,7 +225,9 @@ class ParameterBuilder:
             confidence_threshold=threshold,
             binding_details=binding_details,
             duration_ms=duration_ms,
-            skipped_count=len([d for d in binding_details if d.get("status") == "skipped"]),
+            skipped_count=len(
+                [d for d in binding_details if d.get("status") == "skipped"]
+            ),
         )
 
         return resolved, fallback_params, binding_details
@@ -173,7 +260,9 @@ class ParameterBuilder:
 
             elif binding.source_type == BindingSourceType.STEP_OUTPUT:
                 # 解析 "step_1.output.field" 格式
-                value, success = self._resolve_step_output_binding(binding.source, state)
+                value, success = self._resolve_step_output_binding(
+                    binding.source, state
+                )
                 detail["resolve_path"] = binding.source
                 detail["found"] = success
                 if not success:
@@ -182,13 +271,17 @@ class ParameterBuilder:
                     if len(parts) >= 2:
                         step_id = parts[0].replace("step_", "")
                         step_in_cache = step_id in self.step_outputs
-                        step_in_state = "steps" in state and step_id in state.get("steps", {})
+                        step_in_state = "steps" in state and step_id in state.get(
+                            "steps", {}
+                        )
 
                         if not step_in_cache and not step_in_state:
                             detail["error"] = f"step_{step_id} output not found"
                         else:
                             field_path = ".".join(parts[2:]) if len(parts) > 2 else ""
-                            detail["error"] = f"field '{field_path}' not found in step_{step_id}"
+                            detail["error"] = (
+                                f"field '{field_path}' not found in step_{step_id}"
+                            )
                 return value, success, detail
 
             elif binding.source_type == BindingSourceType.STATE:
@@ -201,6 +294,11 @@ class ParameterBuilder:
             elif binding.source_type == BindingSourceType.LITERAL:
                 # 使用字面量值
                 detail["resolve_path"] = "literal"
+                # default_value 为空时认为无法解析，交给 fallback 策略处理
+                if binding.default_value is None:
+                    detail["found"] = False
+                    detail["error"] = "literal_default_value_missing"
+                    return None, False, detail
                 detail["found"] = True
                 return binding.default_value, True, detail
 
@@ -287,7 +385,6 @@ class ParameterBuilder:
             return f"{{{len(value)} keys}}"
         return str(value)[:max_length]
 
-
     # ==================== LLM 参数推理 ====================
 
     async def build_arguments_with_llm(
@@ -315,10 +412,17 @@ class ParameterBuilder:
             完整的工具参数字典
         """
         import time
-        from auto_agent.tracing import trace_llm_call, trace_binding_event, BindingAction
+
+        from auto_agent.tracing import (
+            BindingAction,
+            trace_binding_event,
+            trace_llm_call,
+        )
 
         if not self.llm_client:
-            return self._build_arguments_fallback_simple(subtask, state, existing_args, tool)
+            return self._build_arguments_fallback_simple(
+                subtask, state, existing_args, tool
+            )
 
         start_time = time.time()
         result = dict(existing_args)
@@ -357,6 +461,18 @@ class ParameterBuilder:
 
         # 4. 提取原始用户需求
         original_query = state.get("inputs", {}).get("query", "")
+
+        # 4.5 LLM 构参缓存（同一步骤/同缺失参数/同状态摘要）直接复用
+        cache_key = (
+            subtask.id,
+            subtask.tool or "",
+            tuple(missing_params),
+            hash(state_summary),
+        )
+        cached = self._llm_args_cache.get(cache_key)
+        if cached:
+            result.update(cached)
+            return result
 
         # 5. 构建语义驱动的 prompt
         prompt = f"""你是一个智能参数构造助手。根据执行历史和当前状态，为工具智能构造参数。
@@ -421,7 +537,9 @@ class ParameterBuilder:
                 )
 
             if json_match:
-                json_str = json_match.group(1) if "```" in response else json_match.group()
+                json_str = (
+                    json_match.group(1) if "```" in response else json_match.group()
+                )
                 new_args = json.loads(json_str)
 
                 # 记录每个参数的来源
@@ -442,7 +560,9 @@ class ParameterBuilder:
                             new_args[key] = resolved
                             source_info["source"] = f"state.{path}"
                             source_info["value_type"] = type(resolved).__name__
-                            source_info["value_preview"] = self._get_value_preview(resolved)
+                            source_info["value_preview"] = self._get_value_preview(
+                                resolved
+                            )
 
                     param_sources.append(source_info)
 
@@ -477,6 +597,8 @@ class ParameterBuilder:
                 )
 
                 result.update(new_args)
+                # 写入缓存（仅缓存“补充的参数”）
+                self._llm_args_cache[cache_key] = dict(new_args)
                 return result
 
         except Exception as e:
@@ -520,9 +642,34 @@ class ParameterBuilder:
         tool_def = tool.definition if tool else None
 
         if tool_def:
+            # 0. param_aliases（无 LLM 时也尽量用 state 映射补齐）
+            if getattr(tool_def, "param_aliases", None):
+                for param_name, state_path in tool_def.param_aliases.items():
+                    if param_name in result and result[param_name] is not None:
+                        continue
+                    if not state_path:
+                        continue
+                    value = None
+                    if isinstance(state_path, str):
+                        if state_path.startswith("state."):
+                            value = get_nested_value(state, state_path[6:])
+                        else:
+                            value = (
+                                get_nested_value(state, state_path)
+                                if "." in state_path
+                                else state.get(state_path)
+                            )
+                    if value is not None:
+                        result[param_name] = value
+
             for param in tool_def.parameters:
                 param_name = param.name
                 if param_name in result and result[param_name] is not None:
+                    continue
+
+                # 0.5 required 参数的 schema 默认值
+                if param.required and param.default is not None:
+                    result[param_name] = param.default
                     continue
 
                 # 1. 尝试从执行历史中按类型匹配
@@ -598,7 +745,6 @@ class ParameterBuilder:
 
         return None
 
-
     # ==================== 参数验证 ====================
 
     def validate_parameters(
@@ -626,7 +772,9 @@ class ParameterBuilder:
             return True, []
 
         tool_def = tool.definition
-        validators = tool_def.parameter_validators if tool_def.parameter_validators else []
+        validators = (
+            tool_def.parameter_validators if tool_def.parameter_validators else []
+        )
 
         if not validators:
             return True, []
@@ -662,8 +810,16 @@ class ParameterBuilder:
                 try:
                     parts = validation_rule.split(",")
                     if len(parts) == 2:
-                        min_val = float(parts[0].strip()) if parts[0].strip() else float("-inf")
-                        max_val = float(parts[1].strip()) if parts[1].strip() else float("inf")
+                        min_val = (
+                            float(parts[0].strip())
+                            if parts[0].strip()
+                            else float("-inf")
+                        )
+                        max_val = (
+                            float(parts[1].strip())
+                            if parts[1].strip()
+                            else float("inf")
+                        )
                         num_value = float(param_value)
                         if num_value < min_val or num_value > max_val:
                             is_valid = False
@@ -677,7 +833,10 @@ class ParameterBuilder:
                     is_valid = False
 
             elif validation_type == "custom":
-                if hasattr(tool_def, "validate_function") and tool_def.validate_function:
+                if (
+                    hasattr(tool_def, "validate_function")
+                    and tool_def.validate_function
+                ):
                     try:
                         validate_fn = tool_def.validate_function
                         if callable(validate_fn):
@@ -713,7 +872,8 @@ class ParameterBuilder:
             验证通过或修正后的参数字典
         """
         import time
-        from auto_agent.tracing import trace_llm_call, trace_flow_event
+
+        from auto_agent.tracing import trace_flow_event, trace_llm_call
 
         max_fix_attempts = 2
 
@@ -734,21 +894,25 @@ class ParameterBuilder:
             validators_info = []
             if tool_def.parameter_validators:
                 for v in tool_def.parameter_validators:
-                    validators_info.append({
-                        "parameter": v.parameter_name,
-                        "type": v.validation_type,
-                        "rule": v.validation_rule,
-                        "error_message": v.error_message,
-                    })
+                    validators_info.append(
+                        {
+                            "parameter": v.parameter_name,
+                            "type": v.validation_type,
+                            "rule": v.validation_rule,
+                            "error_message": v.error_message,
+                        }
+                    )
 
             params_info = []
             for p in tool_def.parameters:
-                params_info.append({
-                    "name": p.name,
-                    "type": p.type,
-                    "description": p.description,
-                    "required": p.required,
-                })
+                params_info.append(
+                    {
+                        "name": p.name,
+                        "type": p.type,
+                        "description": p.description,
+                        "required": p.required,
+                    }
+                )
 
             prompt = f"""你是一个参数修正助手。当前工具参数验证失败，请根据验证规则修正参数。
 
@@ -797,13 +961,17 @@ class ParameterBuilder:
                     for key, new_value in fixed_args.items():
                         old_value = arguments.get(key)
                         if old_value != new_value:
-                            fix_details.append({
-                                "param": key,
-                                "old_value": self._get_value_preview(old_value),
-                                "new_value": self._get_value_preview(new_value),
-                                "old_type": type(old_value).__name__ if old_value else "None",
-                                "new_type": type(new_value).__name__,
-                            })
+                            fix_details.append(
+                                {
+                                    "param": key,
+                                    "old_value": self._get_value_preview(old_value),
+                                    "new_value": self._get_value_preview(new_value),
+                                    "old_type": type(old_value).__name__
+                                    if old_value
+                                    else "None",
+                                    "new_type": type(new_value).__name__,
+                                }
+                            )
 
                     # 记录 LLM 调用
                     trace_llm_call(
