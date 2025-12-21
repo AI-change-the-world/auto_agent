@@ -313,6 +313,16 @@ class BindingPlanner:
 
         steps_json = json.dumps(steps_info, ensure_ascii=False, indent=2)
         state_json = json.dumps(initial_state or {}, ensure_ascii=False, indent=2)
+        available_inputs = []
+        if initial_state and isinstance(initial_state, dict):
+            inp = initial_state.get("inputs")
+            if isinstance(inp, dict):
+                available_inputs = list(inp.keys())
+        inputs_hint = (
+            f"可用的 user_input 字段（source 必须从中选择）: {available_inputs}\n"
+            if available_inputs
+            else ""
+        )
 
         return f"""你是一个参数绑定分析专家。分析执行计划中每个步骤的参数应该从哪里获取。
 
@@ -321,6 +331,9 @@ class BindingPlanner:
 
 【初始状态】
 {state_json}
+
+【提示】
+{inputs_hint}
 
 【执行步骤】
 {steps_json}
@@ -362,6 +375,7 @@ class BindingPlanner:
 3. 注意参数类型匹配（如 array 类型参数应该绑定到 array 输出）
 4. 参数名和输出字段名可能不完全一致，需要语义匹配
 5. 如果无法确定来源，使用 "generated" 类型
+6. 对于 source_type="user_input"，source 必须是【提示】中的字段名；否则请使用 "literal"
 
 【返回格式】
 ```json

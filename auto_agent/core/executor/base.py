@@ -386,17 +386,41 @@ class ExecutionEngine:
 
                 # 执行步骤
                 args = {}
+                build_args_info = {}  # 用于记录参数构造的详细信息
                 if tool_executor:
                     tool = (
                         self.tool_registry.get_tool(subtask.tool)
                         if subtask.tool
                         else None
                     )
+                    # 检测循环执行
+                    is_loop = subtask.id in self._step_outputs
+                    build_args_info["is_loop_execution"] = is_loop
+                    if is_loop:
+                        build_args_info["loop_reason"] = "步骤已执行过，将触发 LLM 基于完整上下文重新构造参数"
+
                     args = (
                         await self._build_tool_arguments(subtask, state, tool)
                         if tool
                         else {}
                     )
+                    build_args_info["final_args"] = {
+                        k: (str(v)[:200] + "..." if isinstance(v, str) and len(v) > 200 else v)
+                        for k, v in args.items()
+                    }
+
+                    # 发送参数构造详情事件
+                    yield {
+                        "event": "param_build",
+                        "data": {
+                            "step": step_num,
+                            "step_id": subtask.id,
+                            "tool": subtask.tool,
+                            "is_loop_execution": is_loop,
+                            "args_preview": build_args_info,
+                        },
+                    }
+
                     output = await tool_executor(subtask.tool, args)
                     result = SubTaskResult(
                         step_id=subtask.id,
@@ -405,6 +429,39 @@ class ExecutionEngine:
                         error=output.get("error"),
                     )
                 else:
+                    # 检测循环执行
+                    is_loop = subtask.id in self._step_outputs
+                    build_args_info["is_loop_execution"] = is_loop
+                    if is_loop:
+                        build_args_info["loop_reason"] = "步骤已执行过，将触发 LLM 基于完整上下文重新构造参数"
+
+                    # 先获取参数信息用于 tracing（在 _execute_subtask 之前）
+                    tool_for_args = (
+                        self.tool_registry.get_tool(subtask.tool)
+                        if subtask.tool
+                        else None
+                    )
+                    if tool_for_args:
+                        preview_args = await self._build_tool_arguments(
+                            subtask, state, tool_for_args
+                        )
+                        build_args_info["final_args"] = {
+                            k: (str(v)[:200] + "..." if isinstance(v, str) and len(v) > 200 else v)
+                            for k, v in preview_args.items()
+                        }
+
+                    # 发送参数构造详情事件
+                    yield {
+                        "event": "param_build",
+                        "data": {
+                            "step": step_num,
+                            "step_id": subtask.id,
+                            "tool": subtask.tool,
+                            "is_loop_execution": is_loop,
+                            "args_preview": build_args_info,
+                        },
+                    }
+
                     result = await self._execute_subtask(
                         subtask, state, conversation_id
                     )
@@ -416,6 +473,16 @@ class ExecutionEngine:
 
                 # 更新状态
                 if result.success:
+                    self._update_state_from_result(
+                        subtask.tool, result.output, state, step_id=subtask.id
+                    )
+                # 期望验证失败但工具本身执行成功（output.success=True）时，也应写入状态，
+                # 这样后续步骤（反思/修正）才能基于失败报告进行针对性优化。
+                elif (
+                    result.expectation_failed
+                    and isinstance(result.output, dict)
+                    and result.output.get("success") is True
+                ):
                     self._update_state_from_result(
                         subtask.tool, result.output, state, step_id=subtask.id
                     )
@@ -966,7 +1033,10 @@ class ExecutionEngine:
         """
         构造工具参数
 
-        核心思路：优先使用 BindingPlan 静态绑定，fallback 到 LLM 推理
+        核心思路：
+        - 首次执行：优先使用 BindingPlan 静态绑定，fallback 到 LLM 推理
+        - 循环执行（步骤被重复执行）：跳过静态绑定，直接触发 LLM 干预，
+          让大模型基于完整上下文（之前的失败原因、验证报告等）来智能构造参数
         """
         from auto_agent.tracing import start_span, trace_flow_event
 
@@ -980,7 +1050,12 @@ class ExecutionEngine:
         if subtask.parameters:
             arguments.update(subtask.parameters)
 
+        # 检测是否是循环执行（步骤已经执行过）
+        # 循环执行意味着之前的方案失败了，需要 LLM 介入来做调整
+        is_loop_execution = subtask.id in self._step_outputs
+
         # 3. 尝试使用 BindingPlan 解析参数
+        # 注意：循环执行时跳过静态绑定，强制走 LLM fallback
         binding_used = False
         fallback_params = []
         binding_resolved = {}
@@ -990,6 +1065,7 @@ class ExecutionEngine:
             self._param_builder
             and hasattr(self, "_binding_plan")
             and self._binding_plan
+            and not is_loop_execution  # 循环执行时跳过静态绑定
         ):
             step_bindings = self._binding_plan.get_step_bindings(subtask.id)
             if step_bindings:
@@ -1092,10 +1168,16 @@ class ExecutionEngine:
                 ):
                     missing_required.append(p.name)
 
-            # 仅当确实存在“必需参数缺失”或“绑定解析需要 fallback”的参数时才调用 LLM
-            # （没有 binding_plan 并不等于需要 LLM）
-            if missing_required or fallback_params:
+            # 触发 LLM fallback 的条件：
+            # 1. 存在必需参数缺失
+            # 2. 绑定解析需要 fallback
+            # 3. 循环执行（之前的方案失败了，需要 LLM 基于完整上下文重新构造参数）
+            should_use_llm = missing_required or fallback_params or is_loop_execution
+
+            if should_use_llm:
                 fallback_reason = []
+                if is_loop_execution:
+                    fallback_reason.append("loop_execution:需要LLM基于完整上下文重新构造参数")
                 if not binding_used:
                     fallback_reason.append("no_binding_plan")
                 if missing_required:

@@ -385,6 +385,15 @@ class FullstackGeneratorRunner:
                     if verbose:
                         print(f"\n   🔄 重试: {data.get('message', '')}")
 
+                elif event_type == "stage_error":
+                    # 执行引擎内部异常（通常是参数绑定/参数构造阶段异常）
+                    if verbose:
+                        step = data.get("step", "?")
+                        name = data.get("name", "unknown")
+                        error = data.get("error", "未知错误")
+                        print(f"\n❌ Step {step}: {name} 发生内部错误")
+                        print(f"   ❗ 错误: {error}")
+
                 elif event_type == "stage_replan":
                     if verbose:
                         print(f"\n⚠️  触发重规划: {data.get('reason', '')}")

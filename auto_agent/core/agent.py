@@ -19,6 +19,7 @@ AutoAgent 主类
 """
 
 import json
+import re
 from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 
 from auto_agent.core.binding_planner import BindingPlanner
@@ -132,23 +133,27 @@ class AutoAgent:
                 iterations=0,
             )
 
-        # Step 1.5: 参数绑定规划（新增）
+        # Step 2: 初始化状态（提前于 binding_plan，让 binding_planner 看见 inputs 结构）
+        state = self._initialize_state(query, template_id, plan.state_schema)
+
+        # Step 2.5: 参数绑定规划（新增）
         binding_plan: Optional[BindingPlan] = None
         if use_binding and len(plan.subtasks) > 1:
             try:
                 binding_plan = await self.binding_planner.create_binding_plan(
                     execution_plan=plan,
                     user_input=query,
+                    initial_state=state,
                 )
             except Exception:
                 # 绑定规划失败不影响执行
                 pass
 
         if binding_plan:
-            print("binding_plan: \n", json.dumps(binding_plan.to_dict(), indent=4, ensure_ascii=False))
-
-        # Step 2: 初始化状态
-        state = self._initialize_state(query, template_id, plan.state_schema)
+            print(
+                "binding_plan: \n",
+                json.dumps(binding_plan.to_dict(), indent=4, ensure_ascii=False),
+            )
 
         # Step 3: 执行（使用 ExecutionEngine）
         agent_info = {
@@ -237,7 +242,10 @@ class AutoAgent:
             }
             return
 
-        # Step 1.5: 参数绑定规划（新增）
+        # Step 2: 初始化状态（提前于 binding_plan，让 binding_planner 看见 inputs 结构）
+        state = self._initialize_state(query, template_id, plan.state_schema)
+
+        # Step 2.5: 参数绑定规划（新增）
         binding_plan: Optional[BindingPlan] = None
         if use_binding and len(plan.subtasks) > 1:
             yield {"event": "planning", "data": {"message": "正在分析参数绑定..."}}
@@ -259,6 +267,7 @@ class AutoAgent:
                 binding_plan = await self.binding_planner.create_binding_plan(
                     execution_plan=plan,
                     user_input=query,
+                    initial_state=state,
                 )
 
                 if binding_plan:
@@ -354,9 +363,6 @@ class AutoAgent:
                 and len(binding_plan.steps) > 0,
             },
         }
-
-        # Step 2: 初始化状态
-        state = self._initialize_state(query, template_id, plan.state_schema)
 
         # Step 3: 执行阶段（直接复用 ExecutionEngine.execute_plan_stream）
         agent_info = {
@@ -508,10 +514,12 @@ class AutoAgent:
         state_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """初始化统一状态字典"""
+        extracted_inputs = self._extract_structured_inputs(query)
         state = {
             "inputs": {
                 "query": query,
                 "template_id": template_id,
+                **extracted_inputs,
             },
             "control": {
                 "iterations": 0,
@@ -540,6 +548,60 @@ class AutoAgent:
                     state[field] = {}
 
         return state
+
+    def _extract_structured_inputs(self, query: str) -> Dict[str, Any]:
+        """
+        从用户 query 中提取结构化输入字段，提升参数绑定鲁棒性。
+
+        典型场景（如 examples/fullstack_generator）会在 query 中包含：
+        - "项目名称: xxx"
+        - "需求描述:\n..."
+
+        BindingPlanner 可能把参数绑定到 user_input.project_name / user_input.requirements / user_input.需求描述 等字段，
+        因此需要这些字段出现在 state["inputs"] 中才能解析成功。
+        """
+        inputs: Dict[str, Any] = {}
+        if not query:
+            return inputs
+
+        # 1) 单行 key: value / key：value
+        for line in query.splitlines():
+            m = re.match(
+                r"^\s*([A-Za-z_][A-Za-z0-9_]{0,40}|[\u4e00-\u9fff]{1,12})\s*[:：]\s*(.+?)\s*$",
+                line,
+            )
+            if not m:
+                continue
+            k = m.group(1).strip()
+            v = m.group(2).strip()
+            if not v:
+                continue
+            # 避免把长段落误识别为 value
+            if len(v) > 200:
+                continue
+            inputs[k] = v
+
+        # 2) 常见字段：项目名称 -> project_name
+        m_name = re.search(r"项目名称\s*[:：]\s*([^\n\r]+)", query)
+        if m_name:
+            name = m_name.group(1).strip()
+            if name:
+                inputs.setdefault("项目名称", name)
+                inputs.setdefault("project_name", name)
+
+        # 3) 常见字段：需求描述（块） -> requirements / 需求描述
+        m_req = re.search(
+            r"需求描述\s*[:：]\s*(.*?)\n\s*请按以下步骤执行\s*[:：]",
+            query,
+            flags=re.DOTALL,
+        )
+        if m_req:
+            req_text = m_req.group(1).strip()
+            if req_text:
+                inputs.setdefault("需求描述", req_text)
+                inputs.setdefault("requirements", req_text)
+
+        return inputs
 
     def _aggregate_results(self, state: Dict[str, Any]) -> str:
         """聚合执行结果"""
